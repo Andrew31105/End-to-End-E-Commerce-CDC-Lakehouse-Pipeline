@@ -83,11 +83,9 @@ def main():
 
 
     parsed_df = (
-        raw_df.selectExpr("CAST(value AS STRING) as json_str", "CAST(timestamp as kafka_ts")
-        withColumn(
-            "data",
-            from_json(col("json_str"), debezium_schema)
-        )
+        raw_df
+        .selectExpr("CAST(value AS STRING) as json_value", "timestamp as kafka_ts")
+        .withColumn("data", from_json(col("json_value"), debezium_schema))
         .select(
             col("data.before").alias("before"),
             col("data.after").alias("after"),
@@ -96,7 +94,6 @@ def main():
             col("kafka_ts"),
             col("json_value").alias("_raw_payload")
         )
-
     )
 
     enriched_df = (
@@ -104,8 +101,17 @@ def main():
         .withColumn("batch_id", lit(batch_id))
     )
 
+    query = (
+        enriched_df.writeStream
+        .format("parquet")
+        .option("path", "s3a://bronze/orders/")
+        .option("checkpointLocation", "s3a://bronze/checkpoints/orders/")
+        .outputMode("append")
+        .start()
+    )
 
-    
+
+
 
     # TODO: Đọc CDC events từ Kafka topic 'pg.public.orders'
     # TODO: Parse Debezium envelope (before/after/op)

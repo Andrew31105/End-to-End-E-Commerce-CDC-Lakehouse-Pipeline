@@ -1,4 +1,4 @@
-# 🏪 Feature Store & Lakehouse – Real-Time E-Commerce Pipeline
+# Feature Store & Lakehouse – Real-Time E-Commerce Pipeline
 
 ![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-blue.svg)
@@ -13,7 +13,7 @@
 ![Airflow](https://img.shields.io/badge/Airflow-Orchestration-lightblue.svg)
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED.svg)
 
-## 📌 Project Overview
+##  Project Overview
 
 **Feature Store & Lakehouse** là kiến trúc kết hợp **CDC (Change Data Capture)** thời gian thực với **Data Lakehouse** trên nền Iceberg, phục vụ cả hai mục tiêu:
 
