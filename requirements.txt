@@ -1,0 +1,32 @@
+# ============================================================
+#  Feature Store & Lakehouse – Python Dependencies
+# ============================================================
+
+# ---- Streaming (PyFlink) ----
+apache-flink==2.3.0
+
+# ---- Batch Processing (PySpark + Iceberg) ----
+# Cài qua Docker image (Dockerfile.spark), không cần local
+# pyiceberg, pyspark, boto3, s3fs
+
+# ---- Database Drivers ----
+psycopg2-binary==2.9.9       # PostgreSQL (mock data generator)
+clickhouse-driver==0.2.6     # ClickHouse native driver
+sqlalchemy==2.0.31            # SQL toolkit
+pandas==2.2.2
+pyarrow==16.1.0
+
+# ---- Data Generation ----
+faker==25.2.0                 # Mock data generation
+
+# ---- Feature Store API ----
+# Cài riêng: pip install -r feature_store/api/requirements.txt
+
+# ---- Airflow ----
+# Chạy trong Docker image apache/airflow, không cần local
+
+# ---- Legacy (web scraping) ----
+# selenium==4.20.0
+# webdriver-manager==4.0.1
+# requests==2.32.3
+

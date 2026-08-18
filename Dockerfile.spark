@@ -1,0 +1,39 @@
+# ============================================================
+# Dockerfile for Apache Spark with Iceberg + MinIO (S3) support
+# ============================================================
+FROM apache/spark:3.5.9-python3
+
+USER root
+
+# Cài đặt thêm các thư viện Python cần thiết cho Iceberg & MinIO
+RUN pip install --no-cache-dir \
+    pyiceberg==0.11.1 \
+    pyarrow==16.1.0 \
+    pandas==2.2.2 \
+    boto3==1.34.144 \
+    botocore==1.34.144 \
+    s3fs==2024.6.1 \
+    psycopg2-binary==2.9.9
+
+# Tải Iceberg Spark runtime JAR (cho Spark SQL với Iceberg)
+# Hadoop catalog sử dụng S3A filesystem để kết nối MinIO
+RUN wget -q -P /opt/spark/jars/ \
+    https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/1.5.2/iceberg-spark-runtime-3.5_2.12-1.5.2.jar && \
+    wget -q -P /opt/spark/jars/ \
+    https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar && \
+    wget -q -P /opt/spark/jars/ \
+    https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.367/aws-java-sdk-bundle-1.12.367.jar && \
+    wget -q -P /opt/spark/jars/ \
+    https://repo1.maven.org/maven2/software/amazon/awssdk/s3/2.25.27/s3-2.25.27.jar && \
+    wget -q -P /opt/spark/jars/ \
+    https://repo1.maven.org/maven2/software/amazon/awssdk/sdk-core/2.25.27/sdk-core-2.25.27.jar && \
+    wget -q -P /opt/spark/jars/ \
+    https://repo1.maven.org/maven2/software/amazon/awssdk/regions/2.25.27/regions-2.25.27.jar
+
+# Copy entrypoint script
+COPY scripts/spark-entrypoint.sh /opt/entrypoint.sh
+RUN chmod +x /opt/entrypoint.sh
+
+USER spark
+
+ENTRYPOINT ["/opt/entrypoint.sh"]

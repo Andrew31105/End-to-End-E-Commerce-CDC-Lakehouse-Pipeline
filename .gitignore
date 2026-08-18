@@ -1,0 +1,38 @@
+# ============================================================
+# .gitignore – Feature Store & Lakehouse Project
+# ============================================================
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Data (mounted volumes)
+data/minio/
+data/iceberg/
+
+# Docker volumes
+pgdata/
+chdata/
+mbdata/
+minio_data/
+trino_data/
+airflow_pgdata/
+
+# Airflow
+airflow/logs/
+airflow/plugins/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Environment
+.env

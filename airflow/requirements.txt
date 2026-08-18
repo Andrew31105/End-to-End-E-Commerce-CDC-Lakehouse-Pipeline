@@ -1,0 +1,4 @@
+apache-airflow==2.9.3
+apache-airflow-providers-apache-spark==4.8.1
+apache-airflow-providers-apache-kafka==1.5.1
+psycopg2-binary==2.9.9
