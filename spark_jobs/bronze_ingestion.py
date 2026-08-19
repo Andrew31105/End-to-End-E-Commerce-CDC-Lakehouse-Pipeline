@@ -11,6 +11,7 @@
 import os
 import sys
 import time
+import uuid
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
@@ -39,22 +40,19 @@ def main():
     spark = get_spark_session("Bronze Ingestion Job")
     spark.sparkContext.setLogLevel("WARN")
 
-    batch_id = int(sys.argv[1]) if len(sys.argv) > 1 else 0
+    kafka_bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+    batch_id = str(uuid.uuid4())
 
     raw_df = (
         spark.readStream
         .format("kafka")
-        .option("kafka.bootstrap.servers", os.environ["KAFKA_BOOTSTRAP_SERVERS"])
+        .option("kafka.bootstrap.servers", kafka_bootstrap_servers)
         .option("subscribe", "pg.public.orders")
         .option("startingOffsets", "earliest")
         .option("failOnDataLoss", "false")
         .load()
     )
 
-    if raw_df.rdd.isEmpty():
-        print("[Bronze] No new CDC events found in Kafka topic 'pg.public.orders'.")
-        spark.stop()
-        return
 
 
     
@@ -100,25 +98,23 @@ def main():
         parsed_df.withColumn("ingestion_ts", current_timestamp())
         .withColumn("batch_id", lit(batch_id))
     )
+    enriched_df.printSchema()
 
     query = (
         enriched_df.writeStream
         .format("parquet")
-        .option("path", "s3a://bronze/orders/")
-        .option("checkpointLocation", "s3a://bronze/checkpoints/orders/")
+        .option("path", "s3a://bronze/raw/orders/")
+        .option("checkpointLocation", "s3a://spark-checkpoint/raw/orders/")
         .outputMode("append")
+        .trigger(availableNow=True)
         .start()
     )
 
 
-
-
-    # TODO: Đọc CDC events từ Kafka topic 'pg.public.orders'
-    # TODO: Parse Debezium envelope (before/after/op)
-    # TODO: Ghi raw Parquet vào MinIO bucket 'bronze' (s3a://bronze/orders/)
-    # TODO: Thêm ingestion timestamp, batch_id
-
-    print("[Bronze] Ingestion job started (placeholder).")
+    query.awaitTermination()
+    print(f"[Bronze] Ingestion batch {batch_id} completed.")
+    df = spark.read.parquet("s3a://bronze/raw/orders/")
+    df.show()
     spark.stop()
 
 

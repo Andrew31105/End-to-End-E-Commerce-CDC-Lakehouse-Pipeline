@@ -50,27 +50,37 @@ FEATURE_GROUPS = {
 
 def get_spark_session(app_name: str) -> SparkSession:
     minio_endpoint = os.getenv("MINIO_ENDPOINT", "http://localhost:9000")
-    minio_access_key = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
-    minio_secret_key = os.getenv("MINIO_SECRET_KEY", "minio")
+    minio_access_key = os.getenv("MINIO_ROOT_USER", os.getenv("MINIO_ACCESS_KEY", "minioadmin"))
+    minio_secret_key = os.getenv("MINIO_ROOT_PASSWORD", os.getenv("MINIO_SECRET_KEY", "minioadmin"))
 
     """
     Create and return a SparkSession with the given application name.
     """
+    packages = [
+        "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1",
+        "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.5.0",
+        "org.apache.hadoop:hadoop-aws:3.3.4",
+        "com.amazonaws:aws-java-sdk-bundle:1.12.262"
+    ]
     spark = (
         SparkSession.builder
         .appName(app_name)
-        .config("spark.jars.packages",
-                "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,"
-                "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.11.0")
-                #minio
+        # Packages JARs
+        .config("spark.jars.packages", ",".join(packages))
+        
+        # Iceberg SQL Extensions
+        .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
+        
+        # MinIO S3A Configuration (Fix triệt để lỗi S3AFileSystem not found)
         .config("spark.hadoop.fs.s3a.endpoint", minio_endpoint)
         .config("spark.hadoop.fs.s3a.access.key", minio_access_key)
         .config("spark.hadoop.fs.s3a.secret.key", minio_secret_key)
         .config("spark.hadoop.fs.s3a.path.style.access", "true")
         .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
         .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
+        .config("spark.hadoop.fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider")
 
-        #iceberg
+        # Iceberg Catalog Configuration
         .config("spark.sql.catalog.iceberg", "org.apache.iceberg.spark.SparkCatalog")
         .config("spark.sql.catalog.iceberg.type", "hadoop")
         .config("spark.sql.catalog.iceberg.warehouse", "s3a://iceberg/")
