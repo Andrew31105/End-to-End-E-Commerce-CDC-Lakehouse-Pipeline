@@ -111,7 +111,7 @@
    - Trigger Flink window jobs
    - Monitoring & alerting
 
-## 📂 Repository Structure
+## Repository Structure
 
 ```text
 .
@@ -164,7 +164,7 @@
     └── iceberg/                    # Iceberg warehouse metadata (local dev)
 ```
 
-## 🚀 Quick Start
+##  Quick Start
 
 ### Prerequisites
 
@@ -174,7 +174,7 @@
 
 ### Step 1: Start Infrastructure
 
-> ⚠️ **Thông tin đăng nhập được quản lý tập trung trong file `.env`** (đã gitignore).
+> **Thông tin đăng nhập được quản lý tập trung trong file `.env`** (đã gitignore).
 > Nếu chưa có, hãy tạo từ bản mẫu: `cp .env.example .env` rồi điền mật khẩu mạnh.
 
 ```bash
@@ -364,24 +364,6 @@ docker compose exec trino trino \
   --execute "SELECT count(*) FROM iceberg.silver.orders_clean"
 ```
 
-##  Roadmap
-
-Xem chi tiết trong [TODO.md](./TODO.md).
-
-- [x] Docker Compose infrastructure (16 services)
-- [x] CDC pipeline (PostgreSQL → Debezium → Kafka)
-- [x] ClickHouse serving tables + MVs
-- [x] MinIO + Iceberg + Trino setup
-- [x] Airflow orchestration scaffolding
-- [x] Feature Store API scaffolding
-- [ ] Bronze ingestion (Kafka → MinIO)
-- [ ] Silver transform (MinIO → Iceberg)
-- [ ] Gold aggregation (Iceberg features)
-- [ ] Flink window aggregation (1-min → ClickHouse)
-- [ ] Feature Store API implementation
-- [ ] Airflow DAGs implementation
-- [ ] Metabase dashboards
-- [ ] Monitoring & alerting
 
 # 3. Kiểm tra Kafka topic đang nhận events
 docker compose exec kafka kafka-console-consumer \

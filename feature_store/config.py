@@ -6,7 +6,7 @@
  (PLACEHOLDER – Code triển khai sau)
 """
 from pyspark.sql import SparkSession
-import os 
+import os
 
 load_dotenv_flag = os.getenv("LOAD_DOTENV", "True").lower() == "true"
 if load_dotenv_flag:
@@ -52,6 +52,7 @@ def get_spark_session(app_name: str) -> SparkSession:
     minio_endpoint = os.getenv("MINIO_ENDPOINT", "http://localhost:9000")
     minio_access_key = os.getenv("MINIO_ROOT_USER", os.getenv("MINIO_ACCESS_KEY", "minioadmin"))
     minio_secret_key = os.getenv("MINIO_ROOT_PASSWORD", os.getenv("MINIO_SECRET_KEY", "minioadmin"))
+    iceberg_warehouse = os.getenv("ICEBERG_WAREHOUSE", "s3a://iceberg-warehouse/")
 
     """
     Create and return a SparkSession with the given application name.
@@ -60,7 +61,8 @@ def get_spark_session(app_name: str) -> SparkSession:
         "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1",
         "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.5.0",
         "org.apache.hadoop:hadoop-aws:3.3.4",
-        "com.amazonaws:aws-java-sdk-bundle:1.12.262"
+        "com.amazonaws:aws-java-sdk-bundle:1.12.262",
+        "org.postgresql:postgresql:42.7.4",
     ]
     spark = (
         SparkSession.builder
@@ -83,7 +85,8 @@ def get_spark_session(app_name: str) -> SparkSession:
         # Iceberg Catalog Configuration
         .config("spark.sql.catalog.iceberg", "org.apache.iceberg.spark.SparkCatalog")
         .config("spark.sql.catalog.iceberg.type", "hadoop")
-        .config("spark.sql.catalog.iceberg.warehouse", "s3a://iceberg/")
+        .config("spark.sql.catalog.iceberg.warehouse", iceberg_warehouse)
+        .config("spark.sql.catalog.iceberg.io-impl", "org.apache.iceberg.hadoop.HadoopFileIO")
         .getOrCreate()
     )
     return spark

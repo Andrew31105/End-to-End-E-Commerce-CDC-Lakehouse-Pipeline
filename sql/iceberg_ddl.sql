@@ -13,6 +13,35 @@
 
 -- Orders cleaned (flattened CDC + dimension joins)
 
+CREATE TABLE IF NOT EXISTS iceberg.silver.dim_users_current (
+    user_id         BIGINT,
+    full_name       STRING,
+    email           STRING,
+    phone           STRING,
+    city            STRING,
+    source_created_at TIMESTAMP,
+    snapshot_ts     TIMESTAMP
+) USING iceberg;
+
+CREATE TABLE IF NOT EXISTS iceberg.silver.dim_categories_current (
+    category_id     INT,
+    category_name   STRING,
+    description     STRING,
+    snapshot_ts     TIMESTAMP
+) USING iceberg;
+
+CREATE TABLE IF NOT EXISTS iceberg.silver.dim_products_current (
+    product_id      BIGINT,
+    product_name    STRING,
+    category_id     INT,
+    base_price      DECIMAL(12, 2),
+    stock           INT,
+    is_active       BOOLEAN,
+    source_created_at TIMESTAMP,
+    source_updated_at TIMESTAMP,
+    snapshot_ts     TIMESTAMP
+) USING iceberg;
+
 
 
 
