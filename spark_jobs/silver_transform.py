@@ -8,18 +8,44 @@
 ============================================================================
  (PLACEHOLDER – Code triển khai sau)
 """
-from pyparsing import col
+from pyspark.sql.functions import col, to_timestamp, coalesce, lit, row_number, desc
 
 from feature_store.config import get_spark_session
+from pyspark.sql.window import Window
+from pyspark.sql.functions import row_number, desc
+
+
+bronze_path = "s3a://bronze/orders/"
+STATE_PATH = "s3a://spark-checkpoint/silver/water_mask/"
+
+def join_dimension(df: DataFrame) -> DataFrame:
+        categories_df = spark.read.format("iceberg").load("iceberg.silver.dim_categories_current")
+        products_df = spark.read.format("iceberg").load("iceberg.silver.dim_products_current")
+        users_df = spark.read.format("iceberg").load("iceberg.silver.dim_users_current")
+
+        joined_df1 = (
+            df.join(products_df, df.product_id == products_df.product_id, "left")
+            .drop(products_df.product_id)
+        )
+
+        joined_df2 = (
+            joined_df1.join(categories_df, joined_df1.category_id == categories_df.category_id, "left")
+            .drop(categories_df.category_id)
+        )
+        joined_df3 = (
+            joined_df2.join(users_df, joined_df2.user_id == users_df.user_id, "left")
+            .drop(users_df.user_id)
+        )
+
+
+        return joined_df3
 
 
 def main():
 
-    get_spark_session("Silver Transform Job")
+    spark = get_spark_session("Silver Transform Job")
 
     spark.sparkContext.setLogLevel("WARN")
-
-    brozene_path = "s3a://bronze/orders/"
 
     order_record_schema = StructType([
         StructField("id", IntegerType(), True),
@@ -51,12 +77,12 @@ def main():
         .load(bronze_path)
     )
 
-    if batch_df.isEmpty():
+    if bronze_df.isEmpty():
         print(f"[Silver] Batch {batch_num}: không có dữ liệu mới.")
         return
 
     flattened_df = (
-        batch_df
+        bronze_df
         .filter(col("op") != "d")
         .select(
             col("after.id").alias("order_id"),
@@ -75,10 +101,83 @@ def main():
     )
 
     deleted_ids_df = (
-        batch_df
+        bronze_df
         .filter(col("op") == "d")
-        .select(col("before.id").alias("order_id"))
+        .select(
+                col("before.id").alias("order_id"),
+                col("before.user_id").alias("user_id"),
+                col("before.product_id").alias("product_id"),
+                col("before.quantity").alias("quantity"),
+                col("before.unit_price").alias("unit_price"),
+                col("before.total_amount").alias("total_amount"),
+                col("before.status").alias("status"),
+                col("before.order_at").alias("order_at"),
+                col("before.updated_at").alias("updated_at"),
+        )
+        
     )
+
+    type_df = (
+        flattened_df
+        .withColumn("order_id", col("order_id").cast("bigint"))
+        .withColumn("user_id", col("user_id").cast("bigint"))
+        .withColumn("product_id", col("product_id").cast("bigint"))
+        .withColumn("quantity", col("quantity").cast("int"))
+        .withColumn("unit_price", col("unit_price").cast("decimal(10,2)"))
+        .withColumn("total_amount", col("total_amount").cast("decimal(10,2)"))
+        .withColumn("status", col("status").cast("string"))
+        .withColumn("order_at", col("order_at").cast("timestamp"))
+        .withColumn("updated_at", col("updated_at").cast("timestamp"))
+    )
+
+
+    typed_df = (
+    type_df
+    .withColumn("order_at", to_timestamp(col("order_at")))
+    .withColumn("updated_at", to_timestamp(col("updated_at")))
+    .withColumn("quantity", coalesce(col("quantity"), lit(0)))
+    .withColumn("unit_price", coalesce(col("unit_price"), lit(0.0)))
+    .withColumn("total_amount", coalesce(col("total_amount"), lit(0.0)))
+    .withColumn("status", coalesce(col("status"), lit("unknown")))
+    .withColumn("updated_at", coalesce(col("updated_at"), col("order_at")))   
+    )
+
+    valid_df = (
+        typed_df.filter(
+            (col("order_id").isNotNull()) &
+            (col("user_id").isNotNull()) &
+            (col("product_id").isNotNull()) &
+            (col("quantity") >= 0) &
+            (col("unit_price") >= 0.0) &
+            (col("total_amount") >= 0.0)
+        )
+    )
+
+    data_quality_df = type_df.size() - valid_df.size()
+
+    print(f"[Silver] Data quality issues found: {data_quality_df}")
+
+    window_spec = Window.partitionBy("id").orderBy(desc("debezium_ts_ms"))
+
+    deduped_df = (
+        valid_df
+        .withColumn("rn", row_number().over(window_spec))
+        .filter(col("rn") == 1)
+        .drop("rn")
+    )
+
+    joined_df = join_dimension(deduped_df)
+
+    query = (
+         joined_df.writeStream
+        .format("iceberg")
+        .option("path", "iceberg.silver.orders_clean")
+        .option("checkpointLocation", "s3a://spark-checkpoint/silver/orders_clean/")
+        .outputMode("append")
+        .trigger(availableNow=True)
+        .start()
+    )
+
     
     # TODO: Đọc raw data từ MinIO Bronze (s3a://bronze/orders/)
     # TODO: Parse & flatten Debezium CDC records (lấy 'after' payload)
