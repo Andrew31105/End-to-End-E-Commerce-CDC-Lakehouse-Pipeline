@@ -134,12 +134,10 @@ services:
         condition: service_healthy
     entrypoint: >
       /bin/sh -c "
+      set -e;
       mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD};
-      mc mb --ignore-existing local/bronze;
-      mc mb --ignore-existing local/silver;
-      mc mb --ignore-existing local/gold;
-      mc mb --ignore-existing local/iceberg-warehouse;
-      mc mb --ignore-existing local/spark-checkpoint;
+      mc mb --ignore-existing local/iceberg-datalake;
+      mc mb --ignore-existing local/iceberg-datawarehouse;
       echo 'MinIO buckets created successfully';
       exit 0;
       "

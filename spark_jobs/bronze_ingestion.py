@@ -103,8 +103,8 @@ def main():
     query = (
         enriched_df.writeStream
         .format("parquet")
-        .option("path", "s3a://bronze/raw/orders/")
-        .option("checkpointLocation", "s3a://spark-checkpoint/raw/orders/")
+        .option("path", "s3a://iceberg-datalake/bronze/raw/orders/")
+        .option("checkpointLocation", "s3a://iceberg-datalake/checkpoint/raw/orders/")
         .outputMode("append")
         .trigger(availableNow=True)
         .start()
@@ -113,7 +113,7 @@ def main():
 
     query.awaitTermination()
     print(f"[Bronze] Ingestion batch {batch_id} completed.")
-    df = spark.read.parquet("s3a://bronze/raw/orders/")
+    df = spark.read.parquet("s3a://iceberg-datalake/bronze/raw/orders/")
     df.show()
     spark.stop()
 

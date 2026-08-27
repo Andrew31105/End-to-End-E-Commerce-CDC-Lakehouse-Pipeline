@@ -8,23 +8,30 @@
 ============================================================================
  (PLACEHOLDER – Code triển khai sau)
 """
-from pyspark.sql.functions import col, to_timestamp, coalesce, lit, row_number, desc
+import os
+import sys
+
+from pyspark.sql.functions import col, to_timestamp, coalesce, lit, row_number, desc, current_timestamp
 from pyspark.sql.types import (
     StructType,
     StructField,
     StringType,
     IntegerType,
     DecimalType,
-    LongType
+    LongType,
+    TimestampType
 )
-from pyspark.sql import DataFrame
-from feature_store.config import get_spark_session
+from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql.window import Window
-from pyspark.sql.functions import row_number, desc
-from scripts.water_mask import read_new_spark
-from scripts.water_mask import  write_watermark
 
-bronze_path = "s3a://bronze/orders/"
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from feature_store.config import get_spark_session
+from scripts.water_mask import read_new_spark, write_watermark
+
+bronze_path = "s3a://iceberg-datalake/bronze/raw/orders/"
 
 def join_dimension(df: DataFrame, spark: SparkSession) -> DataFrame:
         products_df = spark.read.table("iceberg.silver.dim_products_current")
@@ -81,7 +88,7 @@ def main():
     bronze_df, new_water_mark = read_new_spark(spark, bronze_path)
 
     if bronze_df.isEmpty():
-        print(f"[Silver] Batch {batch_num}: không có dữ liệu mới.")
+        print(f"[Silver] {bronze_path}: không có dữ liệu mới.")
         return
 
     flattened_df = (
@@ -156,11 +163,11 @@ def main():
         )
     )
 
-    data_quality_df = type_df.size() - valid_df.size()
+    data_quality_df = type_df.count() - valid_df.count()
 
     print(f"[Silver] Data quality issues found: {data_quality_df}")
 
-    window_spec = Window.partitionBy("id").orderBy(desc("debezium_ts_ms"))
+    window_spec = Window.partitionBy("order_id").orderBy(desc("debezium_ts_ms"))
 
     deduped_df = (
         valid_df
@@ -171,22 +178,86 @@ def main():
 
     joined_df = join_dimension(deduped_df, spark)
 
+    # Đảm bảo bảng target tồn tại (schema khớp với sql/iceberg_ddl.sql)
+    spark.sql("""
+        CREATE TABLE IF NOT EXISTS iceberg.silver.orders_clean (
+            order_id      BIGINT,
+            user_id       BIGINT,
+            product_id    BIGINT,
+            product_name  STRING,
+            category_id   INT,
+            category_name STRING,
+            user_city     STRING,
+            quantity      INT,
+            unit_price    DECIMAL(12, 2),
+            total_amount  DECIMAL(12, 2),
+            status        STRING,
+            ordered_at    TIMESTAMP,
+            updated_at    TIMESTAMP,
+            cdc_op        STRING,
+            ingested_at   TIMESTAMP
+        ) USING iceberg
+        PARTITIONED BY (days(ordered_at))
+    """)
 
+    target_df = (
+        joined_df.select(
+            col("order_id"),
+            col("user_id"),
+            col("product_id"),
+            col("product_name"),
+            col("category_id"),
+            col("category_name"),
+            col("city").alias("user_city"),
+            col("quantity"),
+            col("unit_price").cast("decimal(12, 2)"),
+            col("total_amount").cast("decimal(12, 2)"),
+            col("status"),
+            col("order_at").alias("ordered_at"),
+            col("updated_at"),
+            col("op").alias("cdc_op"),
+            current_timestamp().alias("ingested_at"),
+        )
+    )
+    target_df.createOrReplaceTempView("silver_orders_temp")
 
-    joined_df.createOrReplaceTempView("silver_orders_temp")
+    spark.sql("""
+        MERGE INTO iceberg.silver.orders_clean AS target
+        USING silver_orders_temp AS source
+        ON target.order_id = source.order_id
+        WHEN MATCHED THEN UPDATE SET
+            user_id       = source.user_id,
+            product_id    = source.product_id,
+            product_name  = source.product_name,
+            category_id   = source.category_id,
+            category_name = source.category_name,
+            user_city     = source.user_city,
+            quantity      = source.quantity,
+            unit_price    = source.unit_price,
+            total_amount  = source.total_amount,
+            status        = source.status,
+            ordered_at    = source.ordered_at,
+            updated_at    = source.updated_at,
+            cdc_op        = source.cdc_op,
+            ingested_at   = source.ingested_at
+        WHEN NOT MATCHED THEN INSERT (
+            order_id, user_id, product_id, product_name, category_id, category_name,
+            user_city, quantity, unit_price, total_amount, status, ordered_at,
+            updated_at, cdc_op, ingested_at
+        ) VALUES (
+            source.order_id, source.user_id, source.product_id, source.product_name,
+            source.category_id, source.category_name, source.user_city, source.quantity,
+            source.unit_price, source.total_amount, source.status, source.ordered_at,
+            source.updated_at, source.cdc_op, source.ingested_at
+        )
+    """)
 
-    spark.sql(""" MERGE INTO iceberg.silver.orders_clean AS target
-                USING silver_orders_temp AS source
-                ON target.order_id = source.order_id
-                WHEN MATCHED THEN UPDATE SET *
-                WHEN NOT MATCHED THEN INSERT *""" )
-
-    write_watermark(spark, "s3a://spark-checkpoint/silver/water_mask", new_water_mark)
+    write_watermark(spark, "s3a://iceberg-datalake/checkpoint/silver/water_mask", new_water_mark)
     
 
     
 
-    print("[Silver] Transform job started (placeholder).")
+    print("[Silver] Transform completed → iceberg.silver.orders_clean.")
     spark.stop()
 
 

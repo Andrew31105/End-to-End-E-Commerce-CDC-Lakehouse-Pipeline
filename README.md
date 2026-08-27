@@ -337,7 +337,7 @@ WHERE window_start >= CURRENT_TIMESTAMP - INTERVAL '1' HOUR;
 | `KAFKA_BOOTSTRAP`      | kafka:9092                       | Kafka bootstrap server             |
 | `KAFKA_TOPIC`          | pg.public.orders                 | Debezium topic for orders          |
 | `MINIO_ENDPOINT`       | http://minio:9000                | MinIO S3 endpoint                  |
-| `ICEBERG_WAREHOUSE`    | s3a://iceberg-warehouse          | Iceberg warehouse location         |
+| `ICEBERG_WAREHOUSE`    | s3a://iceberg-datawarehouse      | Iceberg warehouse location         |
 | `CLICKHOUSE_URL`       | jdbc:clickhouse://clickhouse:8123/ecommerce | ClickHouse JDBC    |
 
 ## 🧪 Testing CDC Pipeline End-to-End
