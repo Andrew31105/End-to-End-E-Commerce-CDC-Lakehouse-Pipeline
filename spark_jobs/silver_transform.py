@@ -9,19 +9,27 @@
  (PLACEHOLDER – Code triển khai sau)
 """
 from pyspark.sql.functions import col, to_timestamp, coalesce, lit, row_number, desc
-
+from pyspark.sql.types import (
+    StructType,
+    StructField,
+    StringType,
+    IntegerType,
+    DecimalType,
+    LongType
+)
+from pyspark.sql import DataFrame
 from feature_store.config import get_spark_session
 from pyspark.sql.window import Window
 from pyspark.sql.functions import row_number, desc
-
+from scripts.water_mask import read_new_spark
+from scripts.water_mask import  write_watermark
 
 bronze_path = "s3a://bronze/orders/"
-STATE_PATH = "s3a://spark-checkpoint/silver/water_mask/"
 
-def join_dimension(df: DataFrame) -> DataFrame:
-        categories_df = spark.read.format("iceberg").load("iceberg.silver.dim_categories_current")
-        products_df = spark.read.format("iceberg").load("iceberg.silver.dim_products_current")
-        users_df = spark.read.format("iceberg").load("iceberg.silver.dim_users_current")
+def join_dimension(df: DataFrame, spark: SparkSession) -> DataFrame:
+        products_df = spark.read.table("iceberg.silver.dim_products_current")
+        categories_df = spark.read.table("iceberg.silver.dim_categories_current")
+        users_df = spark.read.table("iceberg.silver.dim_users_current")
 
         joined_df1 = (
             df.join(products_df, df.product_id == products_df.product_id, "left")
@@ -70,12 +78,7 @@ def main():
         StructField("batch_id", StringType(), True),
     ])
 
-    bronze_df = (
-        spark.readStream
-        .format("parquet")
-        .schema(bronze_schema)
-        .load(bronze_path)
-    )
+    bronze_df, new_water_mark = read_new_spark(spark, bronze_path)
 
     if bronze_df.isEmpty():
         print(f"[Silver] Batch {batch_num}: không có dữ liệu mới.")
@@ -166,25 +169,22 @@ def main():
         .drop("rn")
     )
 
-    joined_df = join_dimension(deduped_df)
+    joined_df = join_dimension(deduped_df, spark)
 
-    query = (
-         joined_df.writeStream
-        .format("iceberg")
-        .option("path", "iceberg.silver.orders_clean")
-        .option("checkpointLocation", "s3a://spark-checkpoint/silver/orders_clean/")
-        .outputMode("append")
-        .trigger(availableNow=True)
-        .start()
-    )
+
+
+    joined_df.createOrReplaceTempView("silver_orders_temp")
+
+    spark.sql(""" MERGE INTO iceberg.silver.orders_clean AS target
+                USING silver_orders_temp AS source
+                ON target.order_id = source.order_id
+                WHEN MATCHED THEN UPDATE SET *
+                WHEN NOT MATCHED THEN INSERT *""" )
+
+    write_watermark(spark, "s3a://spark-checkpoint/silver/water_mask", new_water_mark)
+    
 
     
-    # TODO: Đọc raw data từ MinIO Bronze (s3a://bronze/orders/)
-    # TODO: Parse & flatten Debezium CDC records (lấy 'after' payload)
-    # TODO: Chuẩn hóa data types, xử lý null, dedup theo primary key
-    # TODO: Join với dimension tables (products, users, categories)
-    # TODO: Ghi vào Iceberg Silver table (iceberg.silver.orders_clean)
-    # TODO: Thêm data quality checks (null ratio, row count)
 
     print("[Silver] Transform job started (placeholder).")
     spark.stop()
