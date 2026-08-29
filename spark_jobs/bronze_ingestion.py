@@ -53,11 +53,6 @@ def main():
         .load()
     )
 
-
-
-    
-
-
     order_record_schema = StructType([
         StructField("id", IntegerType(), False),
         StructField("user_id", IntegerType(), True),
@@ -78,8 +73,6 @@ def main():
             StructField("transaction", StringType(), True)
         ])
     
-
-
     parsed_df = (
         raw_df
         .selectExpr("CAST(value AS STRING) as json_value", "timestamp as kafka_ts")
@@ -109,7 +102,6 @@ def main():
         .trigger(availableNow=True)
         .start()
     )
-
 
     query.awaitTermination()
     print(f"[Bronze] Ingestion batch {batch_id} completed.")

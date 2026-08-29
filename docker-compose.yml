@@ -11,7 +11,7 @@ services:
     ports:
       - "2181:2181"
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      test: [ "CMD", "nc", "-z", "localhost", "2181" ]
       interval: 10s
       retries: 5
 
@@ -39,7 +39,7 @@ services:
       - "9092:9092"
       - "29092:29092"
     healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      test: [ "CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092" ]
       interval: 15s
       retries: 5
 
@@ -67,7 +67,7 @@ services:
       - pgdata:/var/lib/postgresql/data
       - ./sql/init_postgres.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}" ]
       interval: 10s
       retries: 5
 
@@ -99,7 +99,7 @@ services:
     ports:
       - "8083:8083"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8083/connectors"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8083/connectors" ]
       interval: 15s
       retries: 5
 
@@ -114,12 +114,12 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     command: server /data --console-address ":9001"
     ports:
-      - "9000:9000"    # S3 API
-      - "9001:9001"    # Web Console
+      - "9000:9000" # S3 API
+      - "9001:9001" # Web Console
     volumes:
       - minio_data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
       interval: 15s
       retries: 5
 
@@ -133,14 +133,65 @@ services:
       minio:
         condition: service_healthy
     entrypoint: >
+      /bin/sh -c " set -e; mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD}; mc mb --ignore-existing local/iceberg-datalake; mc mb --ignore-existing local/iceberg-datawarehouse; echo 'MinIO buckets created successfully'; exit 0; "
+
+  # ============================================================
+  #  Hive Metastore DB – PostgreSQL backend cho HMS
+  # ============================================================
+  hive-metastore-db:
+    image: postgres:15-alpine
+    container_name: hive-metastore-db
+    environment:
+      POSTGRES_DB: ${HIVE_METASTORE_DB:-metastore}
+      POSTGRES_USER: ${HIVE_METASTORE_DB_USER:-hive}
+      POSTGRES_PASSWORD: ${HIVE_METASTORE_DB_PASSWORD:-hive123}
+    volumes:
+      - hive_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${HIVE_METASTORE_DB_USER:-hive} -d ${HIVE_METASTORE_DB:-metastore}" ]
+      interval: 10s
+      retries: 5
+
+  # ============================================================
+  #  Hive Metastore – Standalone Thrift Metastore 3.1.2 (Iceberg Catalog)
+  # ============================================================
+  hive-metastore:
+    image: bitsondatadev/hive-metastore:latest
+    container_name: hive-metastore
+    environment:
+      METASTORE_DB_HOSTNAME: hive-metastore-db
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+    entrypoint: >
       /bin/sh -c "
-      set -e;
-      mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD};
-      mc mb --ignore-existing local/iceberg-datalake;
-      mc mb --ignore-existing local/iceberg-datawarehouse;
-      echo 'MinIO buckets created successfully';
-      exit 0;
+        set -e;
+        export HADOOP_HOME=/opt/hadoop-3.2.0;
+        export JAVA_HOME=/usr/local/openjdk-8;
+        export HADOOP_CLASSPATH=$${HADOOP_HOME}/share/hadoop/tools/lib/aws-java-sdk-bundle-1.11.375.jar:$${HADOOP_HOME}/share/hadoop/tools/lib/hadoop-aws-3.2.0.jar:/opt/apache-hive-metastore-3.0.0-bin/lib/postgresql-42.7.4.jar;
+        export HIVE_AUX_JARS_PATH=/opt/apache-hive-metastore-3.0.0-bin/lib/postgresql-42.7.4.jar;
+        echo 'Waiting for database on hive-metastore-db:5432 ...';
+        while ! nc -z hive-metastore-db 5432; do sleep 1; done;
+        echo 'Database on hive-metastore-db:5432 started';
+        if [ ! -f /opt/apache-hive-metastore-3.0.0-bin/lib/postgresql-42.7.4.jar ]; then
+          curl -fsSL https://jdbc.postgresql.org/download/postgresql-42.7.4.jar -o /opt/apache-hive-metastore-3.0.0-bin/lib/postgresql-42.7.4.jar;
+        fi;
+        /opt/apache-hive-metastore-3.0.0-bin/bin/schematool -initSchema -dbType postgres;
+        /opt/apache-hive-metastore-3.0.0-bin/bin/start-metastore
       "
+    ports:
+      - "9083:9083"
+    volumes:
+      - ./configs/metastore-site.xml:/opt/apache-hive-metastore-3.0.0-bin/conf/metastore-site.xml:ro
+    depends_on:
+      hive-metastore-db:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [ "CMD-SHELL", "nc -z localhost 9083 || exit 1" ]
+      interval: 15s
+      retries: 10
+      start_period: 60s
 
   # ============================================================
   #  Spark Master – Batch Processing Engine (Iceberg + MinIO)
@@ -160,8 +211,8 @@ services:
       - AWS_REGION=us-east-1
       - AWS_ENDPOINT_URL=http://minio:9000
     ports:
-      - "8080:8080"    # Spark Master Web UI
-      - "7077:7077"    # Spark Master RPC
+      - "8080:8080" # Spark Master Web UI
+      - "7077:7077" # Spark Master RPC
     volumes:
       - ./spark_jobs:/opt/spark/jobs
       - ./configs/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf
@@ -169,6 +220,8 @@ services:
     depends_on:
       minio-init:
         condition: service_completed_successfully
+      hive-metastore:
+        condition: service_healthy
 
   # ============================================================
   #  Spark Worker
@@ -188,7 +241,7 @@ services:
       - AWS_REGION=us-east-1
       - AWS_ENDPOINT_URL=http://minio:9000
     ports:
-      - "8082:8081"    # Spark Worker Web UI
+      - "8082:8081" # Spark Worker Web UI
     volumes:
       - ./spark_jobs:/opt/spark/jobs
       - ./configs/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf
@@ -196,6 +249,7 @@ services:
     depends_on:
       - spark-master
       - minio-init
+      - hive-metastore
 
   # ============================================================  
   #  Trino – Distributed SQL Query Engine (query Iceberg)
@@ -204,7 +258,7 @@ services:
     image: trinodb/trino:446
     container_name: trino
     ports:
-      - "8084:8080"    
+      - "8084:8080"
     volumes:
       - ./configs/trino-catalog/iceberg.properties:/etc/trino/catalog/iceberg.properties
       - trino_data:/data/trino
@@ -215,8 +269,10 @@ services:
     depends_on:
       minio-init:
         condition: service_completed_successfully
+      hive-metastore:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/v1/info"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8080/v1/info" ]
       interval: 15s
       retries: 5
 
@@ -237,7 +293,7 @@ services:
       - chdata:/var/lib/clickhouse
       - ./sql/clickhouse:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      test: [ "CMD", "clickhouse-client", "--query", "SELECT 1" ]
       interval: 10s
       retries: 5
 
@@ -269,7 +325,7 @@ services:
       clickhouse:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/overview"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8081/overview" ]
       interval: 15s
       retries: 5
 
@@ -306,7 +362,7 @@ services:
     volumes:
       - airflow_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${AIRFLOW_DB_USER} -d ${AIRFLOW_DB}"]
+      test: [ "CMD-SHELL", "pg_isready -U ${AIRFLOW_DB_USER} -d ${AIRFLOW_DB}" ]
       interval: 10s
       retries: 5
 
@@ -341,7 +397,7 @@ services:
       - ./scripts:/opt/airflow/scripts
     command: webserver
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
       interval: 30s
       retries: 5
 
@@ -383,4 +439,5 @@ volumes:
   minio_data:
   trino_data:
   airflow_pgdata:
+  hive_pgdata:
 

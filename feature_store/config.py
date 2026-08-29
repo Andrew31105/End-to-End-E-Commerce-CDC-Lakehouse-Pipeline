@@ -52,7 +52,7 @@ def get_spark_session(app_name: str) -> SparkSession:
     minio_endpoint = os.getenv("MINIO_ENDPOINT", "http://localhost:9000")
     minio_access_key = os.getenv("MINIO_ROOT_USER", os.getenv("MINIO_ACCESS_KEY", "minioadmin"))
     minio_secret_key = os.getenv("MINIO_ROOT_PASSWORD", os.getenv("MINIO_SECRET_KEY", "minioadmin"))
-    iceberg_warehouse = os.getenv("ICEBERG_WAREHOUSE", "s3a://iceberg-datawarehouse/")
+    hive_metastore_uri = os.getenv("HIVE_METASTORE_URI", "thrift://hive-metastore:9083")
 
     """
     Create and return a SparkSession with the given application name.
@@ -73,7 +73,7 @@ def get_spark_session(app_name: str) -> SparkSession:
         # Iceberg SQL Extensions
         .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
         
-        # MinIO S3A Configuration (Fix triệt để lỗi S3AFileSystem not found)
+        # MinIO S3A Configuration
         .config("spark.hadoop.fs.s3a.endpoint", minio_endpoint)
         .config("spark.hadoop.fs.s3a.access.key", minio_access_key)
         .config("spark.hadoop.fs.s3a.secret.key", minio_secret_key)
@@ -82,11 +82,10 @@ def get_spark_session(app_name: str) -> SparkSession:
         .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
         .config("spark.hadoop.fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider")
 
-        # Iceberg Catalog Configuration
+        # Iceberg Catalog Configuration (Hive Metastore)
         .config("spark.sql.catalog.iceberg", "org.apache.iceberg.spark.SparkCatalog")
-        .config("spark.sql.catalog.iceberg.type", "hadoop")
-        .config("spark.sql.catalog.iceberg.warehouse", iceberg_warehouse)
-        .config("spark.sql.catalog.iceberg.io-impl", "org.apache.iceberg.hadoop.HadoopFileIO")
+        .config("spark.sql.catalog.iceberg.type", "hive")
+        .config("spark.sql.catalog.iceberg.uri", hive_metastore_uri)
         .getOrCreate()
     )
     return spark

@@ -252,7 +252,7 @@ def main():
         )
     """)
 
-    write_watermark(spark, "s3a://iceberg-datalake/checkpoint/silver/water_mask", new_water_mark)
+    write_watermark(spark, "silver", new_water_mark)
     
 
     
