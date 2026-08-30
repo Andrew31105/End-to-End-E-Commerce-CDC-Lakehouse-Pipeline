@@ -246,7 +246,7 @@ WHERE window_start >= CURRENT_TIMESTAMP - INTERVAL '1' HOUR;
 | `revenue_per_minute_mv`        | SummingMergeTree    | Doanh thu theo phút             |
 | `order_status_mv`              | AggregatingMergeTree| Trạng thái đơn hàng real-time   |
 
-## 🔧 Configuration
+## Configuration
 
 | Variable               | Default                          | Description                        |
 |------------------------|----------------------------------|------------------------------------|
@@ -258,7 +258,7 @@ WHERE window_start >= CURRENT_TIMESTAMP - INTERVAL '1' HOUR;
 | `ICEBERG_WAREHOUSE`    | s3a://iceberg-datawarehouse      | Iceberg warehouse location         |
 | `CLICKHOUSE_URL`       | jdbc:clickhouse://clickhouse:8123/ecommerce | ClickHouse JDBC    |
 
-## 🧪 Testing CDC Pipeline End-to-End
+##  Testing CDC Pipeline End-to-End
 
 ```bash
 # 1. Kiểm tra dữ liệu ban đầu
