@@ -24,9 +24,9 @@
 
 **Use Case:** Theo dõi doanh thu real-time, tính toán feature cho ML model (recommendation, fraud detection) và BI dashboard — tất cả từ cùng một nguồn dữ liệu CDC.
 
-## 🏗 Architecture
+##  Architecture
 
-![Lakehouse Architecture](lakehhouse2.jpg)
+![Lakehouse Architecture](./lakehhouse2.jpg)
 
 ### Data Flow
 
@@ -227,7 +227,7 @@ WHERE window_start >= CURRENT_TIMESTAMP - INTERVAL '1' HOUR;
 
 ### PostgreSQL (Transactional – Source)
 
-![PostgreSQL Database Model](database.svg)
+![PostgreSQL Database Model](./database.svg)
 
 ### Iceberg (Lakehouse – Silver & Gold)
 
