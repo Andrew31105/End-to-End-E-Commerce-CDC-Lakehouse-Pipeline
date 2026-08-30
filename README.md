@@ -227,28 +227,7 @@ WHERE window_start >= CURRENT_TIMESTAMP - INTERVAL '1' HOUR;
 
 ### PostgreSQL (Transactional – Source)
 
-```
-┌─────────────┐     ┌─────────────┐     ┌──────────────────┐
-│  categories  │     │  products   │     │      users       │
-├─────────────┤     ├─────────────┤     ├──────────────────┤
-│ id (PK)     │◄────│ category_id │     │ id (PK)          │
-│ name        │     │ name        │     │ full_name        │
-│ description │     │ base_price  │     │ email            │
-└─────────────┘     │ stock       │     │ phone            │
-                    │ is_active   │     │ city             │
-                    └─────────────┘     └──────────────────┘
-                           │                      │
-                           ▼                      ▼
-                    ┌─────────────────────────────────────┐
-                    │              orders                  │
-                    ├─────────────────────────────────────┤
-                    │ id (PK), user_id, product_id       │
-                    │ quantity, unit_price, total_amount  │
-                    │ status (pending→confirmed→shipped   │
-                    │         →delivered/cancelled)        │
-                    │ ordered_at, updated_at               │
-                    └─────────────────────────────────────┘
-```
+![PostgreSQL Database Model](database.svg)
 
 ### Iceberg (Lakehouse – Silver & Gold)
 
