@@ -26,7 +26,7 @@
 
 ##  Architecture
 
-![Lakehouse Architecture](./lakehhouse2.jpg)
+![Lakehouse Architecture](./jpg/lakehhouse2.jpg)
 
 ### Data Flow
 
@@ -227,7 +227,7 @@ WHERE window_start >= CURRENT_TIMESTAMP - INTERVAL '1' HOUR;
 
 ### PostgreSQL (Transactional – Source)
 
-![PostgreSQL Database Model](./database.svg)
+![PostgreSQL Database Model](./jpg/database.svg)
 
 ### Iceberg (Lakehouse – Silver & Gold)
 
