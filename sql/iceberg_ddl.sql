@@ -1,11 +1,45 @@
 -- ============================================================
--- Iceberg DDL – Lakehouse Tables (Silver & Gold)
+-- Iceberg DDL – Lakehouse Tables (Bronze / Silver & Gold)
 -- Chạy qua Spark SQL hoặc Trino sau khi infrastructure up
 -- ============================================================
 
+-- ========================
+-- Bronze Layer (Raw CDC)
+-- ========================
+-- Lưu full CDC envelope từ Kafka (Debezium), giữ _raw_payload gốc.
+-- Là Iceberg table để có thể incremental read theo snapshot id.
 
-
-
+CREATE TABLE IF NOT EXISTS iceberg.bronze.orders_raw (
+    before          STRUCT<
+                        id: INT,
+                        user_id: INT,
+                        product_id: INT,
+                        quantity: INT,
+                        unit_price: DECIMAL(10, 2),
+                        total_amount: DECIMAL(10, 2),
+                        status: STRING,
+                        order_at: STRING,
+                        updated_at: STRING
+                    >,
+    after           STRUCT<
+                        id: INT,
+                        user_id: INT,
+                        product_id: INT,
+                        quantity: INT,
+                        unit_price: DECIMAL(10, 2),
+                        total_amount: DECIMAL(10, 2),
+                        status: STRING,
+                        order_at: STRING,
+                        updated_at: STRING
+                    >,
+    op              STRING,
+    debezium_ts_ms  BIGINT,
+    kafka_ts        TIMESTAMP,
+    _raw_payload    STRING,
+    ingestion_ts    TIMESTAMP,
+    batch_id        STRING
+) USING iceberg
+PARTITIONED BY (days(ingestion_ts));
 
 -- ========================
 -- Silver Layer (Cleaned)

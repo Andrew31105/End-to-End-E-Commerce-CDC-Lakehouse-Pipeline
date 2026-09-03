@@ -9,14 +9,19 @@
  (PLACEHOLDER – Code triển khai sau)
 """
 from pyspark.sql import SparkSession
-
+from feature_store.config import get_spark_session
+from pyspark.sql.functions import avg, expr, count, sum as spark_sum, countDistinct
 
 def main():
-    spark = (
-        SparkSession.builder
-        .appName("FeatureStore-Gold-Aggregation")
-        .getOrCreate()
+    spark = get_spark_session("FeatureStore-Gold-Aggregation")
+    df = spark.read.table("iceberg.silver.orders_cleaned")
+
+    city_kpis = df.groupBy("city").agg(
+        count("order_id").alias("order_count"),
+        avg("price").alias("avg_price"),
     )
+    
+
 
     # TODO: Đọc từ Iceberg Silver tables
     # TODO: Build city-level KPIs: avg/median price, order volume

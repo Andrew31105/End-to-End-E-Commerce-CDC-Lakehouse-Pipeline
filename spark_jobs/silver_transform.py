@@ -31,7 +31,7 @@ if PROJECT_ROOT not in sys.path:
 from feature_store.config import get_spark_session
 from scripts.water_mask import read_new_spark, write_watermark
 
-bronze_path = "s3a://iceberg-datalake/bronze/raw/orders/"
+bronze_table = "iceberg.bronze.orders_raw"
 
 def join_dimension(df: DataFrame, spark: SparkSession) -> DataFrame:
         products_df = spark.read.table("iceberg.silver.dim_products_current")
@@ -85,10 +85,10 @@ def main():
         StructField("batch_id", StringType(), True),
     ])
 
-    bronze_df, new_water_mark = read_new_spark(spark, bronze_path)
+    bronze_df, new_water_mark = read_new_spark(spark, bronze_table)
 
     if bronze_df.isEmpty():
-        print(f"[Silver] {bronze_path}: không có dữ liệu mới.")
+        print(f"[Silver] {bronze_table}: không có dữ liệu mới.")
         return
 
     flattened_df = (

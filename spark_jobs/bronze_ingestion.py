@@ -93,19 +93,20 @@ def main():
     )
     enriched_df.printSchema()
 
+    # Ghi vào Iceberg table (không phải file parquet rời) để
+    # tầng Silver có thể incremental read theo snapshot id.
     query = (
         enriched_df.writeStream
-        .format("parquet")
-        .option("path", "s3a://iceberg-datalake/bronze/raw/orders/")
-        .option("checkpointLocation", "s3a://iceberg-datalake/checkpoint/raw/orders/")
+        .format("iceberg")
         .outputMode("append")
         .trigger(availableNow=True)
-        .start()
+        .option("checkpointLocation", "s3a://iceberg-datalake/checkpoint/raw/orders/")
+        .table("iceberg.bronze.orders_raw")
     )
 
     query.awaitTermination()
     print(f"[Bronze] Ingestion batch {batch_id} completed.")
-    df = spark.read.parquet("s3a://iceberg-datalake/bronze/raw/orders/")
+    df = spark.read.format("iceberg").table("iceberg.bronze.orders_raw")
     df.show()
     spark.stop()
 

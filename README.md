@@ -15,14 +15,14 @@
 
 ##  Project Overview
 
-**Feature Store & Lakehouse** là kiến trúc kết hợp **CDC (Change Data Capture)** thời gian thực với **Data Lakehouse** trên nền Iceberg, phục vụ cả hai mục tiêu:
+**Feature Store & Lakehouse** is an architecture that combines **real-time CDC (Change Data Capture)** with an **Iceberg-based Data Lakehouse**, serving two goals:
 
-| Mục tiêu | Công nghệ | Mô tả |
+| Goal | Technology | Description |
 |----------|-----------|-------|
-| **Real-Time Features** | Flink → ClickHouse | Xử lý stream 1-phút window, phục vụ online inference (<100ms) |
-| **Batch Features** | Spark → Iceberg → Trino | Lưu trữ historical data, phục vụ training & BI |
+| **Real-Time Features** | Flink → ClickHouse | Process 1-minute window streams, serving online inference (<100ms) |
+| **Batch Features** | Spark → Iceberg → Trino | Store historical data, serving training & BI |
 
-**Use Case:** Theo dõi doanh thu real-time, tính toán feature cho ML model (recommendation, fraud detection) và BI dashboard — tất cả từ cùng một nguồn dữ liệu CDC.
+**Use Case:** Track real-time revenue, compute features for ML models (recommendation, fraud detection) and BI dashboards — all from the same CDC data source.
 
 ##  Architecture
 
@@ -31,23 +31,23 @@
 ### Data Flow
 
 1. **Transaction Source & Streaming (PostgreSQL + Debezium + Kafka)**
-   - `mock_data.py` liên tục `INSERT / UPDATE` đơn hàng vào PostgreSQL
-   - Debezium đọc WAL, đẩy Raw CDC Events vào Kafka topic `pg.public.orders`
+   - `mock_data.py` continuously performs `INSERT / UPDATE` on orders in PostgreSQL
+   - Debezium reads the WAL and pushes raw CDC events into the Kafka topic `pg.public.orders`
 
 2. **Streaming Path (Flink → ClickHouse)**
-   - Flink đọc CDC events từ Kafka
-   - 1-min tumbling window aggregation (doanh thu, trạng thái đơn hàng)
-   - Ghi kết quả vào ClickHouse (Serving Table) cho real-time query
+   - Flink reads CDC events from Kafka
+   - 1-min tumbling window aggregation (revenue, order status)
+   - Writes results into ClickHouse (serving table) for real-time queries
 
 3. **Batch Path (MinIO → Spark → Iceberg → Trino)**
-   - CDC events được dump từ Kafka xuống MinIO Bronze Zone (raw Parquet)
-   - PySpark đọc Bronze → làm sạch → ghi Iceberg Silver (dimension joins, dedup)
-   - PySpark aggregate → Iceberg Gold (KPIs, features)
-   - Trino query trực tiếp Iceberg tables cho BI và batch feature serving
+   - CDC events are dumped from Kafka into the MinIO Bronze Zone (raw Parquet)
+   - PySpark reads Bronze → cleans → writes Iceberg Silver (dimension joins, dedup)
+   - PySpark aggregates → Iceberg Gold (KPIs, features)
+   - Trino queries Iceberg tables directly for BI and batch feature serving
 
 4. **Orchestration (Airflow)**
-   - Schedule Spark batch jobs (5-min interval)
-   - Trigger Flink window jobs
+   - Schedules Spark batch jobs (5-min interval)
+   - Triggers Flink window jobs
    - Monitoring & alerting
 
 ## Repository Structure
@@ -63,7 +63,7 @@
 │
 ├── scripts/
 │   ├── mock_data.py                # Python traffic generator (INSERT/UPDATE)
-│   ├── register_cdc.sh             # Đăng ký Debezium PostgreSQL connector
+│   ├── register_cdc.sh             # Register Debezium PostgreSQL connector
 │   └── spark-entrypoint.sh         # Spark Master/Worker entrypoint
 │
 ├── flink_jobs/
@@ -79,7 +79,7 @@
 │   ├── init_postgres.sql           # PostgreSQL schema + seed data
 │   ├── clickhouse/                # ClickHouse serving tables + MVs
 │   ├── iceberg_ddl.sql             # Iceberg table definitions (Silver/Gold)
-│   └── trino_views.sql             # Trino views trên Iceberg
+│   └── trino_views.sql             # Trino views on top of Iceberg
 │
 ├── configs/
 │   ├── kafka_settings.py           # Kafka consumer/producer config
@@ -109,18 +109,18 @@
 
 - Docker & Docker Compose v2+
 - Python 3.9+ (local dev)
-- 16GB+ RAM khuyến nghị (toàn bộ stack: 16 containers)
+- 16GB+ RAM recommended (full stack: 16 containers)
 
 ### Step 1: Start Infrastructure
 
-> **Thông tin đăng nhập được quản lý tập trung trong file `.env`** (đã gitignore).
-> Nếu chưa có, hãy tạo từ bản mẫu: `cp .env.example .env` rồi điền mật khẩu mạnh.
+> **Credentials are managed centrally in the `.env` file** (gitignored).
+> If it does not exist yet, create it from the template: `cp .env.example .env` and fill in strong passwords.
 
 ```bash
 docker compose up -d
 ```
 
-Đợi tất cả services healthy (~2-3 phút):
+Wait for all services to become healthy (~2-3 minutes):
 
 ```bash
 docker compose ps
@@ -128,7 +128,7 @@ docker compose ps
 
 ### Step 2: Verify All Services
 
-| Service          | URL                            | Credentials (lấy từ `.env`)        |
+| Service          | URL                            | Credentials (from `.env`)         |
 |------------------|--------------------------------|------------------------------------|
 | PostgreSQL       | `localhost:5432`               | `$POSTGRES_USER` / `$POSTGRES_PASSWORD` |
 | Kafka            | `localhost:9092`               | –                                  |
@@ -149,7 +149,7 @@ docker compose ps
 bash scripts/register_cdc.sh
 ```
 
-Kiểm tra connector:
+Check the connector:
 
 ```bash
 curl -s http://localhost:8083/connectors/ecommerce-pg-connector/status | python3 -m json.tool
@@ -165,7 +165,7 @@ python scripts/mock_data.py --interval 2.0 --update-ratio 0.3
 ### Step 5: Submit Flink Streaming Job
 
 ```bash
-# Tải Flink Kafka connector
+# Download the Flink Kafka connector
 docker compose exec flink-jobmanager wget -P /opt/flink/lib \
   https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-kafka/3.0.2-1.18/flink-sql-connector-kafka-3.0.2-1.18.jar
 
@@ -202,11 +202,11 @@ docker compose exec spark-master \
 ### Step 7: Query Iceberg via Trino
 
 ```bash
-# Mở Trino CLI
+# Open the Trino CLI
 docker compose exec trino trino
 
-# Kiểm tra Iceberg tables
-SHOW CATALOGS;           -- Sẽ thấy 'iceberg'
+# Inspect Iceberg tables
+SHOW CATALOGS;           -- You should see 'iceberg'
 SHOW SCHEMAS FROM iceberg;
 SHOW TABLES FROM iceberg.silver;
 SHOW TABLES FROM iceberg.gold;
@@ -218,10 +218,10 @@ WHERE window_start >= CURRENT_TIMESTAMP - INTERVAL '1' HOUR;
 
 ### Step 8: Visualize in Metabase
 
-1. Mở `http://localhost:3000`
-2. Complete first-time setup
-3. Add ClickHouse và Trino làm data sources
-4. Tạo dashboards cho real-time revenue và order trends
+1. Open `http://localhost:3000`
+2. Complete the first-time setup
+3. Add ClickHouse and Trino as data sources
+4. Create dashboards for real-time revenue and order trends
 
 ##  Data Model
 
@@ -231,7 +231,7 @@ WHERE window_start >= CURRENT_TIMESTAMP - INTERVAL '1' HOUR;
 
 ### Iceberg (Lakehouse – Silver & Gold)
 
-| Layer  | Table                          | Mô tả                                |
+| Layer  | Table                          | Description                          |
 |--------|--------------------------------|--------------------------------------|
 | Silver | `iceberg.silver.orders_clean`  | Cleaned + flattened CDC, dimension joins |
 | Gold   | `iceberg.gold.city_revenue_hourly`   | Revenue KPI by city (hourly)    |
@@ -240,11 +240,11 @@ WHERE window_start >= CURRENT_TIMESTAMP - INTERVAL '1' HOUR;
 
 ### ClickHouse (Serving – Real-Time)
 
-| Table / MV                     | Engine              | Mô tả                           |
+| Table / MV                     | Engine              | Description                     |
 |--------------------------------|---------------------|---------------------------------|
 | `order_events`                 | ReplacingMergeTree  | Raw CDC events (upsert by id)   |
-| `revenue_per_minute_mv`        | SummingMergeTree    | Doanh thu theo phút             |
-| `order_status_mv`              | AggregatingMergeTree| Trạng thái đơn hàng real-time   |
+| `revenue_per_minute_mv`        | SummingMergeTree    | Revenue per minute              |
+| `order_status_mv`              | AggregatingMergeTree| Real-time order status          |
 
 ## Configuration
 
@@ -261,49 +261,48 @@ WHERE window_start >= CURRENT_TIMESTAMP - INTERVAL '1' HOUR;
 ##  Testing CDC Pipeline End-to-End
 
 ```bash
-# 1. Kiểm tra dữ liệu ban đầu
+# 1. Check the initial data
 docker compose exec postgres psql -U admin -d ecommerce -c "SELECT count(*) FROM orders;"
 
-# 2. Bắt đầu traffic generator
+# 2. Start the traffic generator
 python scripts/mock_data.py --interval 1.0 &
 
-# 3. Kiểm tra Kafka topic
+# 3. Check the Kafka topic
 docker compose exec kafka kafka-console-consumer \
   --bootstrap-server localhost:9092 \
   --topic pg.public.orders \
   --max-messages 2
 
-# 4. Kiểm tra ClickHouse
+# 4. Check ClickHouse
 docker compose exec clickhouse clickhouse-client \
   --query "SELECT count(), status FROM order_events GROUP BY status"
 
-# 5. Kiểm tra Iceberg qua Trino
+# 5. Check Iceberg via Trino
 docker compose exec trino trino \
   --execute "SELECT count(*) FROM iceberg.silver.orders_clean"
 ```
 
 
-# 3. Kiểm tra Kafka topic đang nhận events
+```bash
+# 3. Verify the Kafka topic is receiving events
 docker compose exec kafka kafka-console-consumer \
   --bootstrap-server localhost:9092 \
   --topic pg.public.orders \
   --from-beginning --max-messages 3
 
-# 4. Kiểm tra ClickHouse đã nhận dữ liệu
+# 4. Check that ClickHouse has received data
 docker compose exec clickhouse clickhouse-client \
   --query "SELECT count(), status FROM ecommerce.order_events GROUP BY status"
 ```
 
 ##  Notes
 
-- **Debezium Raw Envelope:** Connector gửi raw CDC envelope (có `before`, `after`, `op`) để Flink tự xử lý logic CDC.
-- **Flink Checkpointing:** Được bật mỗi 10 giây để đảm bảo exactly-once semantics và fault-tolerance.
-- **Kafka Connector Jar:** Cần tải `flink-sql-connector-kafka` vào `lib/` của cả JobManager và TaskManager.
-- **ClickHouse Sink:** Sử dụng HTTP interface để insert, tránh phụ thuộc JDBC driver nặng.
-- **Legacy Code:** Các thư mục `notebooks/`, `scraper/`, `spark_jobs/`, `data/` chứa code cũ, có thể giữ lại tham khảo hoặc xoá.
-- url
-- scraped_at
+- **Debezium Raw Envelope:** The connector sends the raw CDC envelope (including `before`, `after`, `op`) so that Flink handles the CDC logic itself.
+- **Flink Checkpointing:** Enabled every 10 seconds to guarantee exactly-once semantics and fault-tolerance.
+- **Kafka Connector Jar:** You need to download `flink-sql-connector-kafka` into `lib/` on both the JobManager and the TaskManager.
+- **ClickHouse Sink:** Uses the HTTP interface to insert, avoiding a heavy JDBC driver dependency.
+- **Legacy Code:** Folders `notebooks/`, `scraper/`, `spark_jobs/`, `data/` contain old code; keep them for reference or delete them.
 
-## 6) Next Steps
+##  Next Steps
 
-Check TODO roadmap in `TODO.md` and start from Sprint 1.
+Check the TODO roadmap in `TODO.md` and start from Sprint 1.

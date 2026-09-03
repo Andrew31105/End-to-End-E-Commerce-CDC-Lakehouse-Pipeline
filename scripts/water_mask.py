@@ -1,81 +1,119 @@
-from datetime import datetime
 from typing import Optional, Tuple
 
 from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql.functions import col, lit, max as spark_max
-from pyspark.sql.types import StructField, StructType, TimestampType
 
 
 WATERMARK_TABLE = "iceberg.metadata.watermarks"
+BRONZE_TABLE = "iceberg.bronze.orders_raw"
 
 
 def _ensure_watermark_table(spark: SparkSession) -> None:
-    """Tạo namespace và bảng Iceberg lưu watermark nếu chưa tồn tại."""
+    """Tạo namespace và bảng Iceberg lưu watermark (snapshot id) nếu chưa tồn tại.
+    KHÔNG dùng CREATE OR REPLACE mỗi lần gọi vì sẽ xóa sạch dữ liệu watermark
+    vừa ghi. Chỉ tạo nếu chưa có; nếu bảng cũ (schema last_ingestion_ts) thì
+    drop một lần để migrate sang schema mới."""
     spark.sql("CREATE NAMESPACE IF NOT EXISTS iceberg.metadata")
+    try:
+        cols = [r["col_name"] for r in spark.sql(f"DESCRIBE {WATERMARK_TABLE}").collect()]
+        if "last_snapshot_id" not in cols:
+            spark.sql(f"DROP TABLE IF EXISTS {WATERMARK_TABLE} PURGE")
+    except Exception:
+        pass
     spark.sql(f"""
         CREATE TABLE IF NOT EXISTS {WATERMARK_TABLE} (
             pipeline_name       STRING,
-            last_ingestion_ts   TIMESTAMP
+            last_snapshot_id    STRING
         ) USING iceberg
     """)
 
 
-def read_watermark(spark: SparkSession, pipeline_name: str = "silver") -> Optional[datetime]:
-    """Đọc watermark từ bảng Iceberg."""
+def read_watermark(spark: SparkSession, pipeline_name: str = "silver") -> Optional[str]:
+    """Đọc snapshot id đã xử lý gần nhất từ bảng watermark."""
     try:
         _ensure_watermark_table(spark)
         df = spark.sql(f"""
-            SELECT last_ingestion_ts
+            SELECT last_snapshot_id
             FROM {WATERMARK_TABLE}
             WHERE pipeline_name = '{pipeline_name}'
         """)
         rows = df.take(1)
-        return rows[0]["last_ingestion_ts"] if rows else None
+        return str(rows[0]["last_snapshot_id"]) if rows else None
     except Exception as e:
         print(f"Error reading watermark for pipeline '{pipeline_name}': {e}")
         return None
 
 
 def write_watermark(
-    spark: SparkSession, pipeline_name: str, watermark_value: datetime
+    spark: SparkSession, pipeline_name: str, snapshot_id: str
 ) -> None:
-    """Ghi/cập nhật watermark vào bảng Iceberg."""
+    """Ghi/cập nhật snapshot id đã xử lý vào bảng watermark."""
     _ensure_watermark_table(spark)
-    ts_str = (
-        watermark_value.strftime("%Y-%m-%d %H:%M:%S")
-        if hasattr(watermark_value, "strftime")
-        else str(watermark_value)
-    )
-
-    # MERGE: update nếu đã có, insert nếu chưa
     spark.sql(f"""
         MERGE INTO {WATERMARK_TABLE} AS target
         USING (SELECT '{pipeline_name}' AS pipeline_name,
-                      CAST('{ts_str}' AS TIMESTAMP) AS last_ingestion_ts) AS source
+                      '{snapshot_id}' AS last_snapshot_id) AS source
         ON target.pipeline_name = source.pipeline_name
-        WHEN MATCHED THEN UPDATE SET last_ingestion_ts = source.last_ingestion_ts
-        WHEN NOT MATCHED THEN INSERT (pipeline_name, last_ingestion_ts)
-            VALUES (source.pipeline_name, source.last_ingestion_ts)
+        WHEN MATCHED THEN UPDATE SET last_snapshot_id = source.last_snapshot_id
+        WHEN NOT MATCHED THEN INSERT (pipeline_name, last_snapshot_id)
+            VALUES (source.pipeline_name, source.last_snapshot_id)
     """)
 
 
+def get_current_snapshot_id(
+    spark: SparkSession, table_name: str = BRONZE_TABLE
+) -> Optional[str]:
+    """Lấy snapshot id mới nhất của bảng Bronze (metadata table .snapshots)."""
+    try:
+        rows = spark.sql(f"""
+            SELECT snapshot_id
+            FROM {table_name}.snapshots
+            ORDER BY committed_at DESC
+            LIMIT 1
+        """).collect()
+        return str(rows[0]["snapshot_id"]) if rows else None
+    except Exception as e:
+        print(f"Error reading current snapshot of '{table_name}': {e}")
+        return None
+
+
 def read_new_spark(
-    spark: SparkSession, bronze_path: str = "s3a://iceberg-datalake/bronze/raw/orders/"
-) -> Tuple[DataFrame, Optional[datetime]]:
-    """Đọc dữ liệu mới từ Bronze (Parquet trên MinIO) dựa trên watermark Iceberg."""
-    full_df = spark.read.format("parquet").load(bronze_path)
+    spark: SparkSession, table_name: str = BRONZE_TABLE
+) -> Tuple[DataFrame, Optional[str]]:
+    """
+    Incremental read Bronze (Iceberg table) theo snapshot id:
+    - Lần đầu (chưa có watermark)          → đọc TOÀN BỘ bảng
+    - Các lần sau (có watermark snapshot)  → chỉ đọc dữ liệu mới
+      từ các snapshot SAU snapshot đã xử lý (start-snapshot-id exclusive)
+    Không ghi watermark ở đây — caller phải ghi SAU KHI transform thành công,
+    để nếu pipeline fail thì dữ liệu vẫn được xử lý lại ở lần chạy kế tiếp.
+    """
+    last_snapshot = read_watermark(spark, "silver")
+    current_snapshot = get_current_snapshot_id(spark, table_name)
 
-    last_watermark = read_watermark(spark, "silver")
+    if current_snapshot is None:
+        # Bảng chưa có snapshot nào (hoặc chưa tồn tại) → trả về DataFrame rỗng
+        try:
+            new_df = spark.read.format("iceberg").table(table_name)
+        except Exception:
+            new_df = spark.range(0).limit(0)
+        return new_df, None
 
-    if last_watermark is None:
-        new_df = full_df
+    if last_snapshot is None:
+        # Lần đầu: chưa có watermark → đọc toàn bộ bảng
+        new_df = spark.read.format("iceberg").table(table_name)
+    elif last_snapshot == current_snapshot:
+        # Không có commit mới → incremental range rỗng sẽ lỗi,
+        # nên trả DataFrame rỗng (giữ schema) thay vì gọi start-snapshot-id
+        new_df = spark.read.format("iceberg").table(table_name).limit(0)
     else:
-        new_df = full_df.filter(col("ingestion_ts") > lit(last_watermark))
+        # Có snapshot mới → chỉ đọc dữ liệu từ các snapshot sau watermark
+        new_df = (
+            spark.read.format("iceberg")
+            .option("start-snapshot-id", last_snapshot)
+            .table(table_name)
+        )
 
     if new_df.isEmpty():
-        return new_df, last_watermark
+        return new_df, current_snapshot
 
-    # Không ghi watermark ở đây — caller phải ghi SAU KHI transform thành công,
-    # để nếu pipeline fail thì dữ liệu vẫn được xử lý lại ở lần chạy kế tiếp.
-    current_max_watermark = new_df.agg(spark_max("ingestion_ts")).collect()[0][0]
-    return new_df, current_max_watermark
+    return new_df, current_snapshot
