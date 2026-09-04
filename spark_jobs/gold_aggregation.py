@@ -71,8 +71,20 @@ def build_city_kpis(spark: SparkSession, df : DataFrame):
 
 def build_product_kpis(spark: SparkSession, df : DataFrame):
     product_kpis = (
+
         
     )
+    order_at_df = spark.sql("""
+    SELECT product_id,
+    COUNT(CASE WHEN order_at >= date_sub(CURRENT_DATE,1) THEN 1 END) AS order_count_1d
+    COUNT (CASE WHEN order_at >= date_sub(CURRENT_DATE,7) THEN 1 END) AS order_count_7d
+    COUNT (CASE WHEN order_at >= date_sub(CURRENT_DATE,30) THEN 1 END) AS order_count_30d
+    FROM df
+    WHERE order_at >= date_sub(CURRENT_DATE,30) AND status NOT IN ('cancelled', 'returned')
+    GROUP BY product_id
+    """)
+
+    
 
 
 
