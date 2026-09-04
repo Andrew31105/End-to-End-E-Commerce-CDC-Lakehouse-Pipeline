@@ -70,7 +70,7 @@ def main():
         StructField("unit_price", DecimalType(10, 2), True),
         StructField("total_amount", DecimalType(10, 2), True),
         StructField("status", StringType(), True),
-        StructField("order_at", StringType(), True),
+        StructField("ordered_at", StringType(), True),
         StructField("updated_at", StringType(), True),
     ])
 
@@ -102,7 +102,7 @@ def main():
             col("after.unit_price").alias("unit_price"),
             col("after.total_amount").alias("total_amount"),
             col("after.status").alias("status"),
-            col("after.order_at").alias("order_at"),
+            col("after.ordered_at").alias("order_at"),
             col("after.updated_at").alias("updated_at"),
             col("op"),
             col("debezium_ts_ms"),
@@ -121,7 +121,7 @@ def main():
                 col("before.unit_price").alias("unit_price"),
                 col("before.total_amount").alias("total_amount"),
                 col("before.status").alias("status"),
-                col("before.order_at").alias("order_at"),
+                col("before.ordered_at").alias("order_at"),
                 col("before.updated_at").alias("updated_at"),
         )
         

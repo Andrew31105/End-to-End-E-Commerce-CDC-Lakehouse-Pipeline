@@ -32,6 +32,17 @@ from feature_store.config import get_spark_session
 
 SILVER_ORDERS_TABLE = "iceberg.silver.orders_clean"
 
+
+def ensure_schemas(spark: SparkSession) -> None:
+    """Tạo namespace Iceberg nếu chưa tồn tại (Hive Metastore database).
+
+    `CREATE TABLE ... iceberg.gold.*` sẽ lỗi NoSuchNamespaceException nếu
+    namespace chưa tồn tại.
+    """
+    for namespace in ("iceberg.silver", "iceberg.gold"):
+        spark.sql(f"CREATE NAMESPACE IF NOT EXISTS {namespace}")
+
+
 def build_city_kpis(spark: SparkSession, df: DataFrame) -> None:
     valid_orders = df.filter(~col("status").isin("cancelled", "returned"))
 
@@ -222,16 +233,11 @@ def build_product_kpis(spark: SparkSession, df: DataFrame) -> None:
     """)
 
 
-
-
-
-    
-
-
-
 def main() -> None:
     spark = get_spark_session("FeatureStore-Gold-Aggregation")
     spark.sparkContext.setLogLevel("WARN")
+
+    ensure_schemas(spark)
 
     df = spark.read.table(SILVER_ORDERS_TABLE)
 

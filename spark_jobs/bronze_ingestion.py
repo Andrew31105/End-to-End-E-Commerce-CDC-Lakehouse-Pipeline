@@ -36,12 +36,58 @@ from pyspark.sql.types import (
 from feature_store.config import get_spark_session
 
 
+def ensure_bronze_schema(spark) -> None:
+    """Tạo namespace + table nếu chưa tồn tại (schema khớp sql/iceberg_ddl.sql).
+
+    Nếu thiếu namespace, Iceberg báo NoSuchNamespaceException; .toTable() chỉ tạo
+    table bên trong namespace đã tồn tại.
+    """
+    spark.sql("CREATE NAMESPACE IF NOT EXISTS iceberg.bronze")
+
+    spark.sql("""
+        CREATE TABLE IF NOT EXISTS iceberg.bronze.orders_raw (
+            before          STRUCT<
+                                id: INT,
+                                user_id: INT,
+                                product_id: INT,
+                                quantity: INT,
+                                unit_price: DECIMAL(10, 2),
+                                total_amount: DECIMAL(10, 2),
+                                status: STRING,
+                                ordered_at: STRING,
+                                updated_at: STRING
+                            >,
+            after           STRUCT<
+                                id: INT,
+                                user_id: INT,
+                                product_id: INT,
+                                quantity: INT,
+                                unit_price: DECIMAL(10, 2),
+                                total_amount: DECIMAL(10, 2),
+                                status: STRING,
+                                ordered_at: STRING,
+                                updated_at: STRING
+                            >,
+            op              STRING,
+            debezium_ts_ms  BIGINT,
+            kafka_ts        TIMESTAMP,
+            _raw_payload    STRING,
+            ingestion_ts    TIMESTAMP,
+            batch_id        STRING
+        ) USING iceberg
+        PARTITIONED BY (days(ingestion_ts))
+    """)
+
+
 def main():
     spark = get_spark_session("Bronze Ingestion Job")
     spark.sparkContext.setLogLevel("WARN")
 
     kafka_bootstrap_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
     batch_id = str(uuid.uuid4())
+
+    # Đảm bảo namespace + bảng tồn tại trước khi mở streaming sink
+    ensure_bronze_schema(spark)
 
     raw_df = (
         spark.readStream
@@ -61,7 +107,7 @@ def main():
         StructField("unit_price", DecimalType(10, 2), True),
         StructField("total_amount", DecimalType(10, 2), True),
         StructField("status", StringType(), True),
-        StructField("order_at", StringType(), True),
+        StructField("ordered_at", StringType(), True),
         StructField("updated_at", StringType(), True),
     ])
 
@@ -95,13 +141,14 @@ def main():
 
     # Ghi vào Iceberg table (không phải file parquet rời) để
     # tầng Silver có thể incremental read theo snapshot id.
+    # Lưu ý: DataStreamWriter dùng .toTable(...), KHÔNG có .table(...)
     query = (
         enriched_df.writeStream
         .format("iceberg")
         .outputMode("append")
         .trigger(availableNow=True)
         .option("checkpointLocation", "s3a://iceberg-datalake/checkpoint/raw/orders/")
-        .table("iceberg.bronze.orders_raw")
+        .toTable("iceberg.bronze.orders_raw")
     )
 
     query.awaitTermination()

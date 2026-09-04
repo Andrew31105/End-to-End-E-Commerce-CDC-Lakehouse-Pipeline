@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS iceberg.bronze.orders_raw (
                         unit_price: DECIMAL(10, 2),
                         total_amount: DECIMAL(10, 2),
                         status: STRING,
-                        order_at: STRING,
+                        ordered_at: STRING,
                         updated_at: STRING
                     >,
     after           STRUCT<
@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS iceberg.bronze.orders_raw (
                         unit_price: DECIMAL(10, 2),
                         total_amount: DECIMAL(10, 2),
                         status: STRING,
-                        order_at: STRING,
+                        ordered_at: STRING,
                         updated_at: STRING
                     >,
     op              STRING,
