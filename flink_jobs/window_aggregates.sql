@@ -11,7 +11,8 @@ CREATE TABLE IF NOT EXISTS kafka_orders (
     updated_at STRING,
     
     -- Event Time & Watermark (Trễ tối đa 5s)
-    event_time AS TO_TIMESTAMP(ordered_at),
+    -- Parse ISO: '2026-09-04T07:36:10.275229Z' (micro, UTC) bằng format tường minh
+    event_time AS TO_TIMESTAMP(ordered_at, 'yyyy-MM-dd''T''HH:mm:ss.SSSSSS''Z'''),
     WATERMARK FOR event_time AS event_time - INTERVAL '5' SECOND,
     
     PRIMARY KEY (id) NOT ENFORCED
@@ -24,7 +25,9 @@ CREATE TABLE IF NOT EXISTS kafka_orders (
     'format' = 'debezium-json'
 );
 
--- 2. SINK TABLE (ClickHouse JDBC - Bổ sung thêm các cột chỉ số)
+-- 2. SINK TABLE (Kafka -> ClickHouse Kafka engine tiêu thụ, xem sql/clickhouse/init.sql)
+--    NOTE: flink-connector-jdbc KHÔNG hỗ trợ ClickHouse (không có dialect) nên sink
+--    qua Kafka, ClickHouse dùng bảng Kafka engine + MV để đổ vào realtime_metrics_1min
 CREATE TABLE IF NOT EXISTS clickhouse_realtime_metrics_1min (
     window_start TIMESTAMP(3),
     window_end TIMESTAMP(3),
@@ -44,17 +47,14 @@ CREATE TABLE IF NOT EXISTS clickhouse_realtime_metrics_1min (
     cancelled_orders_count BIGINT,
     
     -- Business Feature Flags
-    high_value_orders_count BIGINT,
-    
-    PRIMARY KEY (window_start, window_end) NOT ENFORCED
+    high_value_orders_count BIGINT
 ) WITH (
-    'connector' = 'jdbc',
-    'url' = 'jdbc:clickhouse://{CLICKHOUSE_HOST}:{CLICKHOUSE_PORT}/{CLICKHOUSE_DB}',
-    'table-name' = 'realtime_metrics_1min',
-    'username' = '{CLICKHOUSE_USER}',
-    'password' = '{CLICKHOUSE_PASSWORD}',
-    'sink.buffer-flush.max-rows' = '1000',
-    'sink.buffer-flush.interval' = '1s'
+    'connector' = 'kafka',
+    'topic' = 'flink.metrics_1min',
+    'properties.bootstrap.servers' = '{KAFKA_BOOTSTRAP}',
+    'properties.group.id' = 'flink_window_metrics_producer',
+    'scan.startup.mode' = 'earliest-offset',
+    'format' = 'json'
 );
 
 -- 3. TRANSFORMATION (Tumbling Window 1 phút nâng cao)

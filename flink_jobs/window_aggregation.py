@@ -2,11 +2,14 @@ import os
 from pyflink.datastream import StreamExecutionEnvironment
 from pyflink.table import StreamTableEnvironment, EnvironmentSettings
 
-# 1. Nạp .env linh hoạt
+# 1. Nạp .env linh hoạt (bỏ qua nếu chạy trong Docker không có python-dotenv)
 load_dotenv_flag = os.getenv("LOAD_DOTENV", "True").lower() == "true"
 if load_dotenv_flag:
-    from dotenv import load_dotenv as _load_dotenv
-    _load_dotenv()
+    try:
+        from dotenv import load_dotenv as _load_dotenv
+        _load_dotenv()
+    except ImportError:
+        pass  # python-dotenv không có (Docker container) → dùng env vars trực tiếp
 
 def main():
     # 2. Khởi tạo Flink Environment
@@ -17,7 +20,7 @@ def main():
     t_env = StreamTableEnvironment.create(env, environment_settings=settings)
 
     # 3. Đọc & inject biến môi trường vào file SQL
-    sql_file_path = os.path.join(os.path.dirname(__file__), "sql", "window_aggregates.sql")
+    sql_file_path = os.path.join(os.path.dirname(__file__), "window_aggregates.sql")
     with open(sql_file_path, "r", encoding="utf-8") as f:
         sql_content = f.read()
 
@@ -32,7 +35,12 @@ def main():
     )
 
     # 4. Tách các câu SQL bằng dấu chấm phẩy và thực thi
-    sql_statements = [stmt.strip() for stmt in rendered_sql.split(";") if stmt.strip()]
+    #    Lưu ý: loại bỏ dòng comment (-- ...) TRƯỚC khi split(';') — vì ';' nằm trong
+    #    comment sẽ làm câu lệnh bị cắt cụt (SqlParserEOFException).
+    sql_without_comments = "\n".join(
+        ln for ln in rendered_sql.splitlines() if not ln.strip().startswith("--")
+    )
+    sql_statements = [stmt.strip() for stmt in sql_without_comments.split(";") if stmt.strip()]
     
     statement_set = t_env.create_statement_set()
     

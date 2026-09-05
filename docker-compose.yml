@@ -326,6 +326,15 @@ services:
         taskmanager.numberOfTaskSlots: 4
         parallelism.default: 2
         rest.flamegraph.enabled: true
+      # ---- Env cho PyFlink job (window_aggregation.py đọc os.getenv) ----
+      - LOAD_DOTENV=false
+      - KAFKA_BOOTSTRAP=kafka:9092
+      - KAFKA_TOPIC=pg.public.orders
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=8123
+      - CLICKHOUSE_DB=${CLICKHOUSE_DB}
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
     ports:
       - "8081:8081"
     volumes:

@@ -45,3 +45,49 @@ AS SELECT
     count() AS status_count
 FROM ecommerce.order_events
 GROUP BY window_start, status;
+
+-- (4) Flink 1-min window metrics sink (window_aggregation.py -> Flink JDBC sink)
+--     ReplacingMergeTree dedup theo (window_start, window_end)
+CREATE TABLE IF NOT EXISTS ecommerce.realtime_metrics_1min (
+    window_start DateTime64(3),
+    window_end DateTime64(3),
+    total_orders UInt64,
+    total_products_sold UInt64,
+    total_revenue Float64,
+    avg_order_value Float64,
+    max_order_value Float64,
+    min_order_value Float64,
+    pending_orders_count UInt64,
+    confirmed_orders_count UInt64,
+    successful_orders_count UInt64,
+    cancelled_orders_count UInt64,
+    high_value_orders_count UInt64
+) ENGINE = ReplacingMergeTree()
+ORDER BY (window_start, window_end);
+
+-- (4b) Flink ghi metrics ra Kafka topic 'flink.metrics_1min' (vì flink-connector-jdbc
+--      không hỗ trợ ClickHouse). ClickHouse tiêu thụ qua Kafka engine + MV.
+CREATE TABLE IF NOT EXISTS ecommerce.realtime_metrics_1min_kafka (
+    window_start DateTime64(3),
+    window_end DateTime64(3),
+    total_orders UInt64,
+    total_products_sold UInt64,
+    total_revenue Float64,
+    avg_order_value Float64,
+    max_order_value Float64,
+    min_order_value Float64,
+    pending_orders_count UInt64,
+    confirmed_orders_count UInt64,
+    successful_orders_count UInt64,
+    cancelled_orders_count UInt64,
+    high_value_orders_count UInt64
+) ENGINE = Kafka()
+SETTINGS kafka_broker_list='kafka:9092',
+         kafka_topic_list='flink.metrics_1min',
+         kafka_group_name='clickhouse_metrics_1min_grp',
+         kafka_format='JSONEachRow',
+         kafka_num_consumers=1;
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS ecommerce.realtime_metrics_1min_mv
+TO ecommerce.realtime_metrics_1min AS
+SELECT * FROM ecommerce.realtime_metrics_1min_kafka;
