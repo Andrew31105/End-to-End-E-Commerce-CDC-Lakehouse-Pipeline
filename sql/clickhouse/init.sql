@@ -91,3 +91,29 @@ SETTINGS kafka_broker_list='kafka:9092',
 CREATE MATERIALIZED VIEW IF NOT EXISTS ecommerce.realtime_metrics_1min_mv
 TO ecommerce.realtime_metrics_1min AS
 SELECT * FROM ecommerce.realtime_metrics_1min_kafka;
+
+-- (5) Flink per-product 1-min metrics (order_features: entity = product_id)
+CREATE TABLE IF NOT EXISTS ecommerce.product_metrics_1min (
+    product_id           UInt64,
+    window_start         DateTime64(3),
+    total_orders_1min    UInt64,
+    total_revenue_1min   Float64,
+    avg_order_value_1min Float64,
+    status_changed_count UInt64
+) ENGINE = ReplacingMergeTree()
+ORDER BY (window_start, product_id);
+
+CREATE TABLE IF NOT EXISTS ecommerce.product_metrics_1min_kafka (
+    product_id UInt64, window_start DateTime64(3),
+    total_orders_1min UInt64, total_revenue_1min Float64,
+    avg_order_value_1min Float64, status_changed_count UInt64
+) ENGINE = Kafka()
+SETTINGS kafka_broker_list='kafka:9092',
+         kafka_topic_list='flink.product_metrics_1min',
+         kafka_group_name='clickhouse_product_metrics_grp',
+         kafka_format='JSONEachRow',
+         kafka_num_consumers=1;
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS ecommerce.product_metrics_1min_mv
+TO ecommerce.product_metrics_1min AS
+SELECT * FROM ecommerce.product_metrics_1min_kafka;

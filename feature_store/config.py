@@ -5,7 +5,6 @@
 ============================================================================
  (PLACEHOLDER – Code triển khai sau)
 """
-from pyspark.sql import SparkSession
 import os
 
 load_dotenv_flag = os.getenv("LOAD_DOTENV", "True").lower() == "true"
@@ -16,39 +15,50 @@ if load_dotenv_flag:
 # Feature Groups Definition
 FEATURE_GROUPS = {
     "order_features": {
-        "description": "Real-time order aggregation features (1-min window)",
+        "description": "Per-product 1-min window features (Flink -> ClickHouse)",
         "source": "clickhouse",
+        "table": "product_metrics_1min",
         "entity": "product_id",
         "features": [
-            # TODO: "total_orders_1min", "total_revenue_1min",
-            # TODO: "avg_order_value_1min", "status_changed_count"
+            "total_orders_1min",
+            "total_revenue_1min",
+            "avg_order_value_1min",
+            "status_changed_count",
         ],
         "sla": "1 minute",
     },
     "user_features": {
         "description": "User-level historical features (batch, daily)",
         "source": "trino",
+        "table": "silver.orders_clean",
         "entity": "user_id",
         "features": [
-            # TODO: "total_orders_30d", "total_spent_30d",
-            # TODO: "favorite_category", "avg_basket_size"
+            "total_orders_30d",
+            "total_spent_30d",
+            "favorite_category",
+            "avg_basket_size",
         ],
         "sla": "1 day",
     },
     "product_features": {
         "description": "Product popularity & trend features",
         "source": "trino",
+        "table": "gold.product_features_daily",
         "entity": "product_id",
         "features": [
-            # TODO: "order_count_7d", "revenue_7d",
-            # TODO: "stock_turnover_rate", "trending_score"
+            "order_count_7d",
+            "revenue_7d",
+            "stock_turnover_rate",
+            "trending_score",
         ],
         "sla": "1 hour",
     },
 }
 
 
-def get_spark_session(app_name: str) -> SparkSession:
+def get_spark_session(app_name: str) -> "SparkSession":
+    from pyspark.sql import SparkSession  # import nhẹ: chỉ khi thực sự tạo Spark
+
     minio_endpoint = os.getenv("MINIO_ENDPOINT", "http://localhost:9000")
     minio_access_key = os.getenv("MINIO_ROOT_USER", os.getenv("MINIO_ACCESS_KEY", "minioadmin"))
     minio_secret_key = os.getenv("MINIO_ROOT_PASSWORD", os.getenv("MINIO_SECRET_KEY", "minioadmin"))

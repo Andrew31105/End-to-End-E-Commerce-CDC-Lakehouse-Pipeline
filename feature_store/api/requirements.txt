@@ -3,3 +3,4 @@ uvicorn==0.30.6
 clickhouse-driver==0.2.6
 trino==0.329.0
 pydantic==2.8.2
+python-dotenv==1.0.1

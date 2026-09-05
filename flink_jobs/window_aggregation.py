@@ -34,9 +34,6 @@ def main():
         CLICKHOUSE_PASSWORD=os.getenv("CLICKHOUSE_PASSWORD", "admin123")
     )
 
-    # 4. Tách các câu SQL bằng dấu chấm phẩy và thực thi
-    #    Lưu ý: loại bỏ dòng comment (-- ...) TRƯỚC khi split(';') — vì ';' nằm trong
-    #    comment sẽ làm câu lệnh bị cắt cụt (SqlParserEOFException).
     sql_without_comments = "\n".join(
         ln for ln in rendered_sql.splitlines() if not ln.strip().startswith("--")
     )
