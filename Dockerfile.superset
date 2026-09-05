@@ -1,0 +1,16 @@
+# ============================================================
+# Dockerfile.superset – Apache Superset + driver Trino & ClickHouse
+# ============================================================
+# Superset base hỗ trợ sẵn nhiều DB; cần thêm:
+#   - sqlalchemy-trino   : kết nối Trino (đọc Iceberg views)
+#   - clickhouse-connect : kết nối ClickHouse
+# ============================================================
+FROM apache/superset:4.1.1
+
+USER root
+
+RUN pip install --no-cache-dir \
+    sqlalchemy-trino \
+    clickhouse-connect
+
+USER superset
