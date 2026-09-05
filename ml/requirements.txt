@@ -1,0 +1,5 @@
+pandas
+scikit-learn
+joblib
+clickhouse-driver
+python-dotenv
