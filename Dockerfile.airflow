@@ -1,0 +1,21 @@
+# ============================================================
+# Dockerfile.airflow – Airflow + Docker CLI
+# Airflow (LocalExecutor) KHÔNG có Spark, nên các task Spark được
+# chạy bằng cách exec vào container `spark-master` qua docker.sock.
+# Image này chỉ thêm docker CLI (client, không cần daemon).
+# ============================================================
+FROM apache/airflow:2.9.3-python3.11
+
+USER root
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.7.tgz -o /tmp/docker.tgz \
+    && tar -xzf /tmp/docker.tgz -C /tmp \
+    && mv /tmp/docker/docker /usr/local/bin/docker \
+    && rm -rf /tmp/docker /tmp/docker.tgz \
+    && apt-get purge -y --auto-remove curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && docker --version
+
+USER airflow
