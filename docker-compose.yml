@@ -447,24 +447,8 @@ services:
     command: scheduler
 
   # ============================================================
-  #  Metabase – BI Dashboard
-  # ============================================================
-  metabase:
-    image: metabase/metabase:v0.49.6
-    container_name: metabase
-    ports:
-      - "3000:3000"
-    environment:
-      MB_DB_FILE: /metabase-data/metabase.db
-    volumes:
-      - mbdata:/metabase-data
-    depends_on:
-      - clickhouse
-      - trino
-
-  # ============================================================
   #  Apache Superset – BI (Trino + ClickHouse)
-  #  Metabase OSS không có driver Trino/ClickHouse nên dùng Superset.
+  #  (Metabase OSS không có driver Trino/ClickHouse nên đã bỏ, dùng Superset)
   # ============================================================
   superset-init:
     image: second_project/superset:4.1.1
@@ -479,10 +463,12 @@ services:
         condition: service_healthy
     environment:
       - SUPERSET_SECRET_KEY=${SUPERSET_SECRET_KEY:-superset_dev_secret_123}
+      - SUPERSET_ADMIN_USER=${SUPERSET_ADMIN_USER:-admin}
+      - SUPERSET_ADMIN_PASSWORD=${SUPERSET_ADMIN_PASSWORD:-admin}
     volumes:
       - superset_home:/app/superset_home
     entrypoint: >
-      /bin/sh -c "superset fab create-admin --username ${SUPERSET_ADMIN_USER:-admin} --firstname Admin --lastname User --email ${SUPERSET_ADMIN_USER:-admin}@example.com --password ${SUPERSET_ADMIN_PASSWORD:-admin} || true; superset db upgrade; superset init; echo 'Superset init completed'; exit 0;"
+      /bin/sh -c "superset fab create-admin --username $${SUPERSET_ADMIN_USER} --firstname Admin --lastname User --email $${SUPERSET_ADMIN_USER}@example.com --password $${SUPERSET_ADMIN_PASSWORD} || true; superset db upgrade; superset init; echo 'Superset init completed'; exit 0;"
 
   superset:
     image: second_project/superset:4.1.1
@@ -494,6 +480,8 @@ services:
       - "8088:8088"
     environment:
       - SUPERSET_SECRET_KEY=${SUPERSET_SECRET_KEY:-superset_dev_secret_123}
+      - SUPERSET_ADMIN_USER=${SUPERSET_ADMIN_USER:-admin}
+      - SUPERSET_ADMIN_PASSWORD=${SUPERSET_ADMIN_PASSWORD:-admin}
       - SUPERSET_CONFIG_PATH=/app/pythonpath/superset_config.py
     volumes:
       - superset_home:/app/superset_home
@@ -512,7 +500,6 @@ services:
 volumes:
   pgdata:
   chdata:
-  mbdata:
   superset_home:
   minio_data:
   trino_data:

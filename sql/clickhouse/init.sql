@@ -46,7 +46,8 @@ AS SELECT
 FROM ecommerce.order_events
 GROUP BY window_start, status;
 
--- (4) Flink 1-min window metrics sink (window_aggregation.py -> Flink JDBC sink)
+-- (4) Flink 1-min window metrics sink (window_aggregation.py -> Kafka topic,
+--     ClickHouse tiêu thụ qua Kafka engine bên dưới)
 --     ReplacingMergeTree dedup theo (window_start, window_end)
 CREATE TABLE IF NOT EXISTS ecommerce.realtime_metrics_1min (
     window_start DateTime64(3),

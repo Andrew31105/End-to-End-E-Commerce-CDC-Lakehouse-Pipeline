@@ -2,8 +2,8 @@
 ============================================================================
  feature_store/config.py
  Feature Store – Định nghĩa feature groups, entity, metadata
+ + SparkSession factory dùng chung cho các spark job (Bronze/Silver/Gold)
 ============================================================================
- (PLACEHOLDER – Code triển khai sau)
 """
 import os
 
@@ -65,9 +65,6 @@ def get_spark_session(app_name: str) -> "SparkSession":
     hive_metastore_uri = os.getenv("HIVE_METASTORE_URI", "thrift://localhost:9083")
     iceberg_warehouse = os.getenv("ICEBERG_WAREHOUSE", "s3a://iceberg-datawarehouse/")
 
-    """
-    Create and return a SparkSession with the given application name.
-    """
     packages = [
         "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1",
         "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.5.0",

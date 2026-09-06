@@ -6,7 +6,6 @@
  Kiến trúc Feature Store / Lakehouse:
    Kafka (CDC events) → PySpark batch → MinIO Bronze (Parquet raw)
 ============================================================================
- (PLACEHOLDER – Code triển khai sau)
 """
 import os
 import sys

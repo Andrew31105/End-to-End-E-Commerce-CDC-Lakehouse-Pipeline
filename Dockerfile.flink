@@ -20,20 +20,16 @@ RUN ln -sf /usr/bin/python3 /usr/bin/python
 RUN pip3 install --no-cache-dir \
     apache-flink==1.20.1
 
-# ------ Connector JARs cho Flink SQL (Kafka, JDBC, ClickHouse) ------
+# ------ Connector JARs cho Flink SQL (chỉ Kafka; sink ClickHouse qua Kafka engine) ------
 ENV FLINK_LIB=/opt/flink/lib
 
 # Kafka SQL connector (fat jar) – đọc/ghi Kafka topics, hỗ trợ debezium-json format
 RUN curl -fsSL https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-kafka/3.4.0-1.20/flink-sql-connector-kafka-3.4.0-1.20.jar \
     -o ${FLINK_LIB}/flink-sql-connector-kafka-3.4.0-1.20.jar
 
-# JDBC connector (fat jar) – ghi kết quả vào ClickHouse qua JDBC
-RUN curl -fsSL https://repo1.maven.org/maven2/org/apache/flink/flink-connector-jdbc/3.4.0-1.20/flink-connector-jdbc-3.4.0-1.20.jar \
-    -o ${FLINK_LIB}/flink-connector-jdbc-3.4.0-1.20.jar
-
-# ClickHouse JDBC driver
-RUN curl -fsSL https://repo1.maven.org/maven2/com/clickhouse/clickhouse-jdbc/0.6.0/clickhouse-jdbc-0.6.0-all.jar \
-    -o ${FLINK_LIB}/clickhouse-jdbc-0.6.0-all.jar
+# (Không cần flink-connector-jdbc/clickhouse-jdbc: chúng KHÔNG hỗ trợ ClickHouse
+#  dialect. Thay vào đó Flink ghi ra Kafka topic rồi ClickHouse tiêu thụ qua
+#  Kafka engine table + Materialized View – xem sql/clickhouse/init.sql)
 
 USER flink
 

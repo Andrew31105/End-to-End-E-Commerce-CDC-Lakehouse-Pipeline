@@ -1,308 +1,294 @@
 # Feature Store & Lakehouse – Real-Time E-Commerce Pipeline
 
-![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-blue.svg)
-![Kafka](https://img.shields.io/badge/Kafka-Latest-red.svg)
-![Debezium](https://img.shields.io/badge/Debezium-CDC-orange.svg)
-![MinIO](https://img.shields.io/badge/MinIO-S3-green.svg)
-![Apache Spark](https://img.shields.io/badge/Apache_Spark-Batch-orange.svg)
-![Apache Iceberg](https://img.shields.io/badge/Apache_Iceberg-Lakehouse-blue.svg)
-![Trino](https://img.shields.io/badge/Trino-Query_Engine-purple.svg)
-![Apache Flink](https://img.shields.io/badge/Apache_Flink-Streaming-red.svg)
-![ClickHouse](https://img.shields.io/badge/ClickHouse-Serving-yellow.svg)
-![Airflow](https://img.shields.io/badge/Airflow-Orchestration-lightblue.svg)
-![Docker](https://img.shields.io/badge/Docker-Compose-2496ED.svg)
+A **Lakehouse + Feature Store** system that reads a single CDC source
+(PostgreSQL) to serve both **batch features** (Spark -> Iceberg -> Trino; for
+training and BI) and **realtime features** (Flink -> ClickHouse; online
+inference in <100 ms).
 
-##  Project Overview
-
-**Feature Store & Lakehouse** is an architecture that combines **real-time CDC (Change Data Capture)** with an **Iceberg-based Data Lakehouse**, serving two goals:
-
-| Goal | Technology | Description |
-|----------|-----------|-------|
-| **Real-Time Features** | Flink → ClickHouse | Process 1-minute window streams, serving online inference (<100ms) |
-| **Batch Features** | Spark → Iceberg → Trino | Store historical data, serving training & BI |
-
-**Use Case:** Track real-time revenue, compute features for ML models (recommendation, fraud detection) and BI dashboards — all from the same CDC data source.
-
-##  Architecture
+## Architecture
 
 ![Lakehouse Architecture](./jpg/lakehhouse2.jpg)
 
-### Data Flow
 
-1. **Transaction Source & Streaming (PostgreSQL + Debezium + Kafka)**
-   - `mock_data.py` continuously performs `INSERT / UPDATE` on orders in PostgreSQL
-   - Debezium reads the WAL and pushes raw CDC events into the Kafka topic `pg.public.orders`
+**Data lifecycle**
 
-2. **Streaming Path (Flink → ClickHouse)**
-   - Flink reads CDC events from Kafka
-   - 1-min tumbling window aggregation (revenue, order status)
-   - Writes results into ClickHouse (serving table) for real-time queries
+1. `mock_data.py` inserts/updates orders in PostgreSQL.
+2. Debezium reads the WAL and publishes CDC events (`before`/`after`/`op`
+   envelope) to Kafka.
+3. **Realtime:** Flink (processing-time, 1-minute tumbling windows) computes
+   global and per-product metrics, writes them to Kafka topics -> ClickHouse
+   (Kafka engine + materialized view) as serving tables -> the Feature Store
+   API serves them for online inference.
+4. **Batch:** Airflow orchestrates Spark: Kafka -> Bronze (MinIO, raw Parquet)
+   -> Silver (Iceberg, cleaned + dimension joins) -> Gold (Iceberg, KPIs and
+   features) -> Trino views for BI.
+5. **ML:** models are trained from ClickHouse/Iceberg and infer through the
+   Feature Store API.
 
-3. **Batch Path (MinIO → Spark → Iceberg → Trino)**
-   - CDC events are dumped from Kafka into the MinIO Bronze Zone (raw Parquet)
-   - PySpark reads Bronze → cleans → writes Iceberg Silver (dimension joins, dedup)
-   - PySpark aggregates → Iceberg Gold (KPIs, features)
-   - Trino queries Iceberg tables directly for BI and batch feature serving
-
-4. **Orchestration (Airflow)**
-   - Schedules Spark batch jobs (5-min interval)
-   - Triggers Flink window jobs
-   - Monitoring & alerting
-
-## Repository Structure
+## Repository structure
 
 ```text
 .
-├── docker-compose.yml              # Infrastructure (16 services)
-├── Dockerfile.flink                # Flink + PyFlink image
-├── Dockerfile.spark                # Spark + Iceberg + MinIO image
-├── README.md
-├── TODO.md
-├── requirements.txt
-│
-├── scripts/
-│   ├── mock_data.py                # Python traffic generator (INSERT/UPDATE)
-│   ├── register_cdc.sh             # Register Debezium PostgreSQL connector
-│   └── spark-entrypoint.sh         # Spark Master/Worker entrypoint
-│
-├── flink_jobs/
-│   ├── streaming_etl.py            # Flink CDC → ClickHouse streaming
-│   └── window_aggregation.py       # Flink 1-min window aggregation (placeholder)
-│
-├── spark_jobs/
-│   ├── bronze_ingestion.py         # Kafka → MinIO Bronze (placeholder)
-│   ├── silver_transform.py         # MinIO Bronze → Iceberg Silver (placeholder)
-│   └── gold_aggregation.py         # Iceberg Silver → Iceberg Gold (placeholder)
-│
-├── sql/
-│   ├── init_postgres.sql           # PostgreSQL schema + seed data
-│   ├── clickhouse/                # ClickHouse serving tables + MVs
-│   ├── iceberg_ddl.sql             # Iceberg table definitions (Silver/Gold)
-│   └── trino_views.sql             # Trino views on top of Iceberg
-│
-├── configs/
-│   ├── kafka_settings.py           # Kafka consumer/producer config
-│   ├── spark-defaults.conf         # Spark + Iceberg + MinIO configuration
-│   └── trino-catalog/
-│       └── iceberg.properties      # Trino Iceberg connector config
-│
-├── airflow/
-│   └── dags/
-│       ├── feature_pipeline_dag.py # Main Feature Store pipeline DAG (placeholder)
-│       └── batch_iceberg_dag.py    # Daily batch ETL DAG (placeholder)
-│
-├── feature_store/
-│   ├── config.py                   # Feature Group definitions
-│   └── api/
-│       ├── main.py                 # FastAPI Feature Store API (placeholder)
-│       └── requirements.txt
-│
-└── data/
-    ├── minio/                      # MinIO persistent data
-    └── iceberg/                    # Iceberg warehouse metadata (local dev)
++-- docker-compose.yml          # All infrastructure (16 containers)
++-- Dockerfile.{airflow,flink,spark,superset}
++-- requirements.txt            # Host Python deps (mock_data, ...)
++-- .env.example                # Config template (copy to .env)
+|
++-- scripts/
+|   +-- mock_data.py            # Traffic generator (INSERT/UPDATE orders)
+|   +-- register_cdc.sh         # Register the Debezium Postgres connector
+|   +-- spark-entrypoint.sh     # Spark master/worker entrypoint
+|
++-- spark_jobs/                 # Run inside spark-master (Airflow docker exec)
+|   +-- bronze_ingestion.py     # Kafka CDC -> MinIO Bronze (raw Parquet)
+|   +-- dim_snapshot.py         # Postgres -> Silver dim_* (SCD snapshot)
+|   +-- silver_transform.py     # Bronze -> Silver orders_clean (join, dedup)
+|   +-- gold_aggregation.py     # Silver -> Gold KPI/feature tables
+|
++-- flink_jobs/
+|   +-- window_aggregation.py   # Load SQL + env -> statement set (realtime job)
+|   +-- window_aggregates.sql   # 2 sinks: global + per-product metrics (1 min)
+|
++-- feature_store/              # Shared by Spark jobs and the API
+|   +-- config.py               # get_spark_session() + FEATURE_GROUPS metadata
+|   +-- api/
+|       +-- main.py             # FastAPI on :8000
+|       +-- requirements.txt
+|
++-- ml/                         # Sprint 4 - ML demo (RandomForest)
+|   +-- train_realtime_model.py # Train to predict next-minute orders/revenue
+|   +-- predict_next.py         # Online inference through the Feature Store API
+|   +-- models/*.joblib
+|
++-- airflow/
+|   +-- dags/
+|       +-- batch_iceberg_dag.py         # @hourly Bronze -> Silver -> Gold
+|       +-- flink_realtime_dag.py        # */2 min: keep the Flink job running
+|
++-- sql/
+|   +-- init_postgres.sql       # Postgres schema + seed data
+|   +-- iceberg_ddl.sql         # Bronze/Silver/Gold Iceberg DDL
+|   +-- trino_views.sql         # 6 BI views in iceberg.views
+|   +-- clickhouse/init.sql     # Serving tables + Kafka engine + MVs
+|
++-- configs/
+|   +-- spark-defaults.conf     # Spark + Iceberg + MinIO
+|   +-- superset_config.py      # Dev-only: CSRF disabled (for REST API calls)
+|   +-- metastore-site.xml, hive-site.xml
+|   +-- trino-catalog/iceberg.properties
+|
++-- jpg/                        # Architecture & ERD images
++-- data/                       # Local mounts (gitignored)
 ```
 
-##  Quick Start
+## Quick start
 
-### Prerequisites
-
-- Docker & Docker Compose v2+
-- Python 3.9+ (local dev)
-- 16GB+ RAM recommended (full stack: 16 containers)
-
-### Step 1: Start Infrastructure
-
-> **Credentials are managed centrally in the `.env` file** (gitignored).
-> If it does not exist yet, create it from the template: `cp .env.example .env` and fill in strong passwords.
+### 0. Prerequisites
 
 ```bash
-docker compose up -d
+cp .env.example .env    # then fill in strong passwords
+docker compose version   # Docker Compose v2+
 ```
 
-Wait for all services to become healthy (~2-3 minutes):
+> `.env` holds the real credentials and is gitignored - never commit it.
+
+### 1. Start the whole stack
 
 ```bash
-docker compose ps
+docker compose up -d --build    # --build only needed the first time
+docker compose ps               # wait until services are healthy (~2-3 min)
 ```
 
-### Step 2: Verify All Services
-
-| Service          | URL                            | Credentials (from `.env`)         |
-|------------------|--------------------------------|------------------------------------|
-| PostgreSQL       | `localhost:5432`               | `$POSTGRES_USER` / `$POSTGRES_PASSWORD` |
-| Kafka            | `localhost:9092`               | –                                  |
-| Debezium REST    | `http://localhost:8083`        | –                                  |
-| MinIO S3 API     | `http://localhost:9000`        | `$MINIO_ROOT_USER` / `$MINIO_ROOT_PASSWORD` |
-| MinIO Console    | `http://localhost:9001`        | `$MINIO_ROOT_USER` / `$MINIO_ROOT_PASSWORD` |
-| Spark Master UI  | `http://localhost:8080`        | –                                  |
-| Spark Worker UI  | `http://localhost:8082`        | –                                  |
-| Trino Web UI     | `http://localhost:8084`        | –                                  |
-| ClickHouse       | `http://localhost:8123`        | `$CLICKHOUSE_USER` / `$CLICKHOUSE_PASSWORD` |
-| Flink Web UI     | `http://localhost:8081`        | –                                  |
-| Airflow          | `http://localhost:8085`        | `$AIRFLOW_ADMIN_USER` / `$AIRFLOW_ADMIN_PASSWORD` |
-| Metabase         | `http://localhost:3000`        | setup on first run                 |
-
-### Step 3: Register CDC Connector
+### 2. Register CDC and start generating data
 
 ```bash
-bash scripts/register_cdc.sh
+bash scripts/register_cdc.sh    # registers Debezium connector -> pg.public.orders
+python scripts/mock_data.py --interval 2.0 --update-ratio 0.3   # continuous traffic
 ```
 
-Check the connector:
+### 3. Enable the pipelines in Airflow
+
+Open http://localhost:8085 (`AIRFLOW_ADMIN_USER` / `AIRFLOW_ADMIN_PASSWORD`) and
+**unpause the two DAGs**:
+
+| DAG | Schedule | Role |
+|-----|----------|------|
+| `batch_iceberg_pipeline` | `@hourly` | Bronze -> Silver -> Gold (Spark batch) |
+| `flink_realtime_ensure_running` | `*/2 * * * *` | Submits/keeps the Flink realtime job alive (self-healing) |
 
 ```bash
-curl -s http://localhost:8083/connectors/ecommerce-pg-connector/status | python3 -m json.tool
+# or via CLI (from the host, requires only the webserver):
+docker compose exec airflow-webserver airflow dags unpause batch_iceberg_pipeline
+docker compose exec airflow-webserver airflow dags unpause flink_realtime_ensure_running
 ```
 
-### Step 4: Start Mock Traffic Generator
+While running, Airflow `docker exec`s into `spark-master` to `spark-submit` and
+into `flink-jobmanager` to `flink run` (see `Dockerfile.airflow` - the image
+adds the docker CLI reading `/var/run/docker.sock`).
+
+### 4. Verify the data
 
 ```bash
-pip install psycopg2-binary faker
-python scripts/mock_data.py --interval 2.0 --update-ratio 0.3
+# Realtime - ClickHouse (per-product, produced by Flink)
+docker compose exec clickhouse clickhouse-client \
+  --query "SELECT product_id, window_start, total_orders_1min, total_revenue_1min
+           FROM ecommerce.product_metrics_1min ORDER BY window_start DESC LIMIT 5"
+
+# Batch - Trino (Iceberg + views)
+docker compose exec trino trino --execute \
+  "SELECT * FROM iceberg.views.daily_revenue_summary ORDER BY report_date DESC LIMIT 5"
 ```
 
-### Step 5: Submit Flink Streaming Job
+## Services
 
-```bash
-# Download the Flink Kafka connector
-docker compose exec flink-jobmanager wget -P /opt/flink/lib \
-  https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-kafka/3.0.2-1.18/flink-sql-connector-kafka-3.0.2-1.18.jar
+| Service           | URL                          | Credentials (.env)                          |
+|-------------------|------------------------------|---------------------------------------------|
+| PostgreSQL        | `localhost:5432`             | `POSTGRES_USER` / `POSTGRES_PASSWORD`       |
+| Kafka (host)      | `localhost:29092`            | -                                          |
+| Debezium REST     | `http://localhost:8083`      | -                                          |
+| MinIO Console     | `http://localhost:9001`      | `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD`   |
+| Spark Master UI   | `http://localhost:8080`      | -                                          |
+| Flink UI          | `http://localhost:8081`      | -                                          |
+| Trino             | `http://localhost:8084`      | -                                          |
+| ClickHouse (HTTP) | `http://localhost:8123`      | `CLICKHOUSE_USER` / `CLICKHOUSE_PASSWORD`   |
+| Airflow           | `http://localhost:8085`      | `AIRFLOW_ADMIN_USER` / `AIRFLOW_ADMIN_PASSWORD` |
+| Feature Store API | `http://localhost:8000`      | (runs on the host, see below)               |
+| Superset          | `http://localhost:8088`      | `SUPERSET_ADMIN_USER` / `SUPERSET_ADMIN_PASSWORD` |
 
-docker compose exec flink-taskmanager wget -P /opt/flink/lib \
-  https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-kafka/3.0.2-1.18/flink-sql-connector-kafka-3.0.2-1.18.jar
+> The Airflow webserver and scheduler must share the same
+> `AIRFLOW__WEBSERVER__SECRET_KEY` (already set in compose), otherwise task
+> logs fail with the 404 "served logs" error.
 
-# Submit job
-docker compose exec flink-jobmanager \
-  /opt/flink/bin/flink run --python /opt/project/flink_jobs/streaming_etl.py
-```
+## Data model
 
-### Step 6: Run Spark Batch Jobs (Manual)
-
-```bash
-# Bronze: Kafka → MinIO
-docker compose exec spark-master \
-  /opt/spark/bin/spark-submit \
-    --master spark://spark-master:7077 \
-    /opt/spark/jobs/bronze_ingestion.py
-
-# Silver: MinIO Bronze → Iceberg
-docker compose exec spark-master \
-  /opt/spark/bin/spark-submit \
-    --master spark://spark-master:7077 \
-    /opt/spark/jobs/silver_transform.py
-
-# Gold: Iceberg Silver → Iceberg Gold
-docker compose exec spark-master \
-  /opt/spark/bin/spark-submit \
-    --master spark://spark-master:7077 \
-    /opt/spark/jobs/gold_aggregation.py
-```
-
-### Step 7: Query Iceberg via Trino
-
-```bash
-# Open the Trino CLI
-docker compose exec trino trino
-
-# Inspect Iceberg tables
-SHOW CATALOGS;           -- You should see 'iceberg'
-SHOW SCHEMAS FROM iceberg;
-SHOW TABLES FROM iceberg.silver;
-SHOW TABLES FROM iceberg.gold;
-
-# Query feature
-SELECT * FROM iceberg.gold.city_revenue_hourly
-WHERE window_start >= CURRENT_TIMESTAMP - INTERVAL '1' HOUR;
-```
-
-### Step 8: Visualize in Metabase
-
-1. Open `http://localhost:3000`
-2. Complete the first-time setup
-3. Add ClickHouse and Trino as data sources
-4. Create dashboards for real-time revenue and order trends
-
-##  Data Model
-
-### PostgreSQL (Transactional – Source)
+### PostgreSQL (transactional source) - entities
 
 ![PostgreSQL Database Model](./jpg/database.svg)
 
-### Iceberg (Lakehouse – Silver & Gold)
+| Entity | Description | Notes |
+|--------|-------------|-------|
+| `users` | Customers | `full_name`, `email`, `phone`, `city` |
+| `categories` | Product categories | `name`, `description` |
+| `products` | Products | FK `category_id`, `base_price`, `stock`, `is_active` |
+| `orders` | Orders - **the CDC subject** | FK `user_id`, `product_id`; `quantity`, `unit_price`, `total_amount`, `status` (`pending/confirmed/shipped/delivered/cancelled/returned`) |
 
-| Layer  | Table                          | Description                          |
-|--------|--------------------------------|--------------------------------------|
-| Silver | `iceberg.silver.orders_clean`  | Cleaned + flattened CDC, dimension joins |
-| Gold   | `iceberg.gold.city_revenue_hourly`   | Revenue KPI by city (hourly)    |
-| Gold   | `iceberg.gold.category_revenue_hourly` | Revenue KPI by category (hourly) |
-| Gold   | `iceberg.gold.product_features_daily` | Product popularity features (daily) |
+Only `public.orders` is captured by Debezium (see `scripts/register_cdc.sh`);
+dims are snapshotted by Spark. Schema/seed: `sql/init_postgres.sql`.
 
-### ClickHouse (Serving – Real-Time)
+### Iceberg (catalog `iceberg`, Hive Metastore) - batch
 
-| Table / MV                     | Engine              | Description                     |
-|--------------------------------|---------------------|---------------------------------|
-| `order_events`                 | ReplacingMergeTree  | Raw CDC events (upsert by id)   |
-| `revenue_per_minute_mv`        | SummingMergeTree    | Revenue per minute              |
-| `order_status_mv`              | AggregatingMergeTree| Real-time order status          |
+| Layer  | Tables                                                        |
+|--------|---------------------------------------------------------------|
+| Bronze | `bronze.orders_raw` (raw Parquet, MinIO `iceberg-datalake`)   |
+| Silver | `silver.orders_clean`, `silver.dim_products_current`, `silver.dim_*` |
+| Gold   | `gold.city_revenue_hourly`, `gold.category_revenue_hourly`, `gold.product_features_daily` |
 
-## Configuration
+### Trino views (`iceberg.views`) - BI query layer
 
-| Variable               | Default                          | Description                        |
-|------------------------|----------------------------------|------------------------------------|
-| `PG_HOST`              | localhost                        | PostgreSQL host                    |
-| `PG_DB`                | ecommerce                        | Database name                      |
-| `KAFKA_BOOTSTRAP`      | kafka:9092                       | Kafka bootstrap server             |
-| `KAFKA_TOPIC`          | pg.public.orders                 | Debezium topic for orders          |
-| `MINIO_ENDPOINT`       | http://minio:9000                | MinIO S3 endpoint                  |
-| `ICEBERG_WAREHOUSE`    | s3a://iceberg-datawarehouse      | Iceberg warehouse location         |
-| `CLICKHOUSE_URL`       | jdbc:clickhouse://clickhouse:8123/ecommerce | ClickHouse JDBC    |
+| View | Pattern | Purpose |
+|------|---------|---------|
+| `city_revenue_latest`, `category_revenue_latest` | A - snapshot | KPIs of the latest closed hour (AOV recomputed as revenue/orders) |
+| `city_daily_revenue`, `category_daily_revenue`, `daily_revenue_summary` | B - daily rollup | Daily trends, no hard-coded date |
+| `top_trending_products` | C - ranking | Top-10 trending products of the latest snapshot |
 
-##  Testing CDC Pipeline End-to-End
+Recreate the views if the schema disappears:
 
 ```bash
-# 1. Check the initial data
-docker compose exec postgres psql -U admin -d ecommerce -c "SELECT count(*) FROM orders;"
-
-# 2. Start the traffic generator
-python scripts/mock_data.py --interval 1.0 &
-
-# 3. Check the Kafka topic
-docker compose exec kafka kafka-console-consumer \
-  --bootstrap-server localhost:9092 \
-  --topic pg.public.orders \
-  --max-messages 2
-
-# 4. Check ClickHouse
-docker compose exec clickhouse clickhouse-client \
-  --query "SELECT count(), status FROM order_events GROUP BY status"
-
-# 5. Check Iceberg via Trino
-docker compose exec trino trino \
-  --execute "SELECT count(*) FROM iceberg.silver.orders_clean"
+docker compose exec -T trino trino --execute "CREATE SCHEMA IF NOT EXISTS iceberg.views"
+cat sql/trino_views.sql | docker compose exec -T trino trino
 ```
 
+### ClickHouse (`ecommerce`) - realtime serving
+
+| Table | Source | Notes |
+|-------|--------|-------|
+| `order_events` | Kafka CDC | ReplacingMergeTree (upsert by id) |
+| `realtime_metrics_1min` (+`_kafka`+`_mv`) | Flink topic `flink.metrics_1min` | Global metrics per minute |
+| `product_metrics_1min` (+`_kafka`+`_mv`) | Flink topic `flink.product_metrics_1min` | Per-product metrics per minute -> `order_features` |
+
+## Feature Store API
+
+Run it on the host (requires `feature_store/api/requirements.txt`; e.g. conda
+env `crypto`):
 
 ```bash
-# 3. Verify the Kafka topic is receiving events
-docker compose exec kafka kafka-console-consumer \
-  --bootstrap-server localhost:9092 \
-  --topic pg.public.orders \
-  --from-beginning --max-messages 3
-
-# 4. Check that ClickHouse has received data
-docker compose exec clickhouse clickhouse-client \
-  --query "SELECT count(), status FROM ecommerce.order_events GROUP BY status"
+pip install -r feature_store/api/requirements.txt
+conda run -n crypto python -m uvicorn feature_store.api.main:app --host 127.0.0.1 --port 8000
 ```
 
-##  Notes
+| Endpoint | Description |
+|----------|-------------|
+| `GET /health` | Health check |
+| `GET /feature-groups` | List feature groups |
+| `GET /features/{feature_group}?entity_id=N` | Get a feature vector |
 
-- **Debezium Raw Envelope:** The connector sends the raw CDC envelope (including `before`, `after`, `op`) so that Flink handles the CDC logic itself.
-- **Flink Checkpointing:** Enabled every 10 seconds to guarantee exactly-once semantics and fault-tolerance.
-- **Kafka Connector Jar:** You need to download `flink-sql-connector-kafka` into `lib/` on both the JobManager and the TaskManager.
-- **ClickHouse Sink:** Uses the HTTP interface to insert, avoiding a heavy JDBC driver dependency.
-- **Legacy Code:** Folders `notebooks/`, `scraper/`, `spark_jobs/`, `data/` contain old code; keep them for reference or delete them.
+Feature groups currently served:
 
-##  Next Steps
+| Group | Entity | Source | Example |
+|-------|--------|--------|---------|
+| `order_features` | `product_id` | ClickHouse `product_metrics_1min` | `GET /features/order_features?entity_id=3` |
+| `product_features` | `product_id` | Trino `gold.product_features_daily` + dim | `GET /features/product_features?entity_id=3` |
+| `user_features` | `user_id` | Trino `silver.orders_clean` (30d aggregate) | `GET /features/user_features?entity_id=2` |
 
-Check the TODO roadmap in `TODO.md` and start from Sprint 1.
+## BI - Apache Superset
+
+Metabase OSS has no Trino/ClickHouse driver, so **Superset** is used
+(`sqlalchemy-trino` and `clickhouse-connect` are added in `Dockerfile.superset`).
+
+1. Open http://localhost:8088 and log in with `admin` / `admin` (or
+   `SUPERSET_ADMIN_USER` / `SUPERSET_ADMIN_PASSWORD`).
+2. Two databases are already registered:
+   - **Trino** `trino://superset@trino:8080/iceberg/views` - reads Iceberg views
+   - **ClickHouse** `clickhousedb+connect://admin:...@clickhouse:8123/ecommerce`
+3. Create datasets from the tables/views, then charts, then dashboards (e.g.
+   **E-commerce BI (Live)**).
+4. `configs/superset_config.py` disables CSRF (dev-only) to ease REST API calls.
+
+## ML demo (Sprint 4)
+
+```bash
+# Train: read ClickHouse product_metrics_1min, build lag-1/lag-2 features +
+#        hour/minute, time split 80/20, RandomForest -> ml/models/*.joblib
+conda run -n crypto python ml/train_realtime_model.py
+
+# Online inference demo: call the Feature Store API :8000 + lags from
+# ClickHouse -> predict the next minute
+conda run -n crypto python ml/predict_next.py --product-id 3
+```
+
+> This demo only illustrates the **serving layer -> ML** pipeline (the model is
+> trained from/reads ClickHouse/Flink features and infers through the real
+> Feature Store endpoint). Data is still small and event-window based, so
+> RMSE/R2 are illustrative, not production-grade.
+
+## Operations & troubleshooting
+
+```bash
+docker compose logs -f airflow-scheduler flink-jobmanager   # pipeline logs
+docker compose exec flink-jobmanager /opt/flink/bin/flink list   # is the realtime job running?
+docker compose ps                                           # full stack status
+docker compose down                                         # stop (keep data volumes)
+docker compose down -v                                      # stop + delete volumes (data loss)
+```
+
+**Notable gotchas**
+
+- Airflow runs Spark jobs via `docker exec spark-master spark-submit` with
+  `--conf spark.jars.ivy=/tmp/.ivy2` (the `spark` user has `HOME=/nonexistent`)
+  and `--packages` for the Kafka/Postgres jars. Never run the Bronze job
+  manually at the same time as Airflow (shared streaming `availableNow`
+  checkpoint).
+- Flink uses **processing time** (`PROCTIME`) because event-time watermarks
+  never fire on a column computed from a nested `ROW`; the ClickHouse sink goes
+  through a **Kafka engine + materialized view** because `flink-connector-jdbc`
+  has no ClickHouse dialect.
+- The `iceberg.views` schema can occasionally disappear (Bronze/Silver/Gold
+  tables remain) - recreate the schema and re-run `sql/trino_views.sql`.
+
+## Completed
+
+- Sprint 1: Spark batch Bronze -> Silver -> Gold + dimensions (Airflow
+  `batch_iceberg_pipeline`)
+- Sprint 2: Flink realtime per-product -> ClickHouse + Feature Store API (:8000)
+- Sprint 3: Trino BI views + Superset dashboard
+- Sprint 4: ML demo (train + online inference)

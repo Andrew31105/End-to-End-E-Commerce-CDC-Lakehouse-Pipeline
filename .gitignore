@@ -22,10 +22,10 @@ data/iceberg/
 # Docker volumes
 pgdata/
 chdata/
-mbdata/
 minio_data/
 trino_data/
 airflow_pgdata/
+hive_pgdata/
 
 # Airflow
 airflow/logs/

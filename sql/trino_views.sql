@@ -1,16 +1,4 @@
--- ============================================================
--- Trino Views – Query Layer trên Iceberg (cho BI / Metabase)
--- Chạy qua Trino CLI:  docker compose exec -T trino trino < sql/trino_views.sql
--- ============================================================
--- LƯU Ý THIẾT KẾ:
---  * View = câu SQL được đặt tên, lưu trong catalog (iceberg.views).
---    BI tool query view như query bảng thường, data luôn "sống".
---  * Pattern A (KPI snapshot)  : bucket giờ gần nhất (MAX window_start)
---    -> card "hiện tại", không phụ thuộc đồng hồ thật.
---  * Pattern B (Daily rollup)  : cuộn hourly -> daily, KHÔNG hard-code ngày
---    -> Metabase tự filter theo date picker, không sợ double-count.
---  * Pattern C (Ranking)       : dùng MAX(snapshot_date) cho robust.
--- ============================================================
+
 
 -- ============================================================
 -- PATTERN A – KPI snapshot (card dashboard "hiện tại")
