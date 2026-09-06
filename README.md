@@ -235,6 +235,8 @@ Feature groups currently served:
 Metabase OSS has no Trino/ClickHouse driver, so **Superset** is used
 (`sqlalchemy-trino` and `clickhouse-connect` are added in `Dockerfile.superset`).
 
+![E-commerce BI (Live) dashboard](./jpg/dashboard.jpeg)
+
 1. Open http://localhost:8088 and log in with `admin` / `admin` (or
    `SUPERSET_ADMIN_USER` / `SUPERSET_ADMIN_PASSWORD`).
 2. Two databases are already registered:
@@ -255,6 +257,8 @@ conda run -n crypto python ml/train_realtime_model.py
 # ClickHouse -> predict the next minute
 conda run -n crypto python ml/predict_next.py --product-id 3
 ```
+
+![Realtime ML prediction output](./jpg/dudoanml.jpeg)
 
 > This demo only illustrates the **serving layer -> ML** pipeline (the model is
 > trained from/reads ClickHouse/Flink features and infers through the real

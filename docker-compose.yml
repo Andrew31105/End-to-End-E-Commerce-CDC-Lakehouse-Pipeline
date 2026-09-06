@@ -466,7 +466,7 @@ services:
       - SUPERSET_ADMIN_USER=${SUPERSET_ADMIN_USER:-admin}
       - SUPERSET_ADMIN_PASSWORD=${SUPERSET_ADMIN_PASSWORD:-admin}
     volumes:
-      - superset_home:/app/superset_home
+      - ./data/superset_home:/app/superset_home
     entrypoint: >
       /bin/sh -c "superset fab create-admin --username $${SUPERSET_ADMIN_USER} --firstname Admin --lastname User --email $${SUPERSET_ADMIN_USER}@example.com --password $${SUPERSET_ADMIN_PASSWORD} || true; superset db upgrade; superset init; echo 'Superset init completed'; exit 0;"
 
@@ -484,7 +484,7 @@ services:
       - SUPERSET_ADMIN_PASSWORD=${SUPERSET_ADMIN_PASSWORD:-admin}
       - SUPERSET_CONFIG_PATH=/app/pythonpath/superset_config.py
     volumes:
-      - superset_home:/app/superset_home
+      - ./data/superset_home:/app/superset_home
       - ./configs/superset_config.py:/app/pythonpath/superset_config.py
     command: >
       /bin/sh -c "superset run -h 0.0.0.0 -p 8088 --with-threads"
@@ -500,7 +500,6 @@ services:
 volumes:
   pgdata:
   chdata:
-  superset_home:
   minio_data:
   trino_data:
   airflow_pgdata:

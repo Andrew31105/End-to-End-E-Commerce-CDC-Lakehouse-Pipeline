@@ -18,6 +18,7 @@ venv/
 # Data (mounted volumes)
 data/minio/
 data/iceberg/
+data/superset_home/
 
 # Docker volumes
 pgdata/
