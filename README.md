@@ -25,6 +25,46 @@ inference in <100 ms).
 5. **ML:** models are trained from ClickHouse/Iceberg and infer through the
    Feature Store API.
 
+> **Historical backfill (one-off):** `scripts/run_olist_backfill.sh` writes 24
+> months of Olist history (~1,000,000 orders) straight into Bronze using the same
+> Debezium envelope (`op='c'`), so Silver/Gold process it with no code change.
+
+## Dataset (Olist)
+
+The 1-million-order backfill is built from the **Olist Brazilian E-Commerce**
+dataset (license CC BY-NC-SA 4.0). The raw CSVs (121 MB) are **not committed** -
+download them from Kaggle and drop them into `Dataset/`:
+
+<https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce>
+
+Files used: `olist_orders`, `olist_order_items`, `olist_customers`,
+`olist_products`, `product_category_name_translation`
+(`payments`, `reviews`, `sellers`, `geolocation` are not used).
+
+```text
+Dataset/*.csv
+  -> olist_prepare.py        DuckDB: flatten multi-item orders (quantity = COUNT(items),
+                             total = SUM(price + freight), product = arg_max(price)),
+                             map 8 Olist statuses to the app's 6, translate categories,
+                             scale BRL->VND, shift the timeline so the last order = now
+  -> olist_load_postgres.py  dims -> PostgreSQL with id offsets (1e3 / 1e5 / 1e6)
+  -> olist_amplify.py        x11 + small noise -> 1,000,000 orders (order_id >= 1e8)
+  -> backfill_olist.py       Parquet -> iceberg.bronze.orders_raw (before=NULL, op='c')
+  -> Airflow DAG             Silver -> Gold, exactly like live CDC data
+```
+
+Design decisions and honest limits:
+
+| Point | How it is handled |
+|---|---|
+| One Olist order has several items, the app's `orders` is flat | `quantity = COUNT(items)`, `total = SUM(price + freight)`, `unit_price = total / quantity`, `product_id = arg_max(price)` |
+| Olist statuses (8) vs app statuses (6) | `created->pending`, `approved/invoiced/processing->confirmed`, `shipped`, `delivered`, `canceled->cancelled`, `unavailable->returned` |
+| Currency (BRL vs VND seed data) | fixed `--fx 5000` so the whole warehouse uses one currency |
+| Timeline 2016-2018 makes `CURRENT_DATE` metrics zero | shift so the newest order = now; drop the sparse tail after 2018-08-31 |
+| `orders` id collision with CDC rows | backfill uses `order_id >= 100,000,000`; dims use offset id ranges |
+| Amplified data compresses extremely well | 1M rows -> ~45 MB Parquet (11 near-duplicate copies + noise) |
+| Realtime realism | `mock_data.py` samples a **real** Olist order (user/product/quantity/price) and uses Olist's real cancel/return rates |
+
 ## Repository structure
 
 ```text
@@ -33,14 +73,22 @@ inference in <100 ms).
 +-- Dockerfile.{airflow,flink,spark,superset}
 +-- requirements.txt            # Host Python deps (mock_data, ...)
 +-- .env.example                # Config template (copy to .env)
++-- Dataset/                    # Olist raw CSVs - NOT committed (see Dataset)
 |
 +-- scripts/
-|   +-- mock_data.py            # Traffic generator (INSERT/UPDATE orders)
+|   +-- mock_data.py            # Traffic generator (sampled from real Olist orders)
+|   +-- db.py                   # Shared PostgreSQL helper (.env -> psycopg2)
 |   +-- register_cdc.sh         # Register the Debezium Postgres connector
+|   +-- ensure_bi_views.sh      # Recreate iceberg.views after `down -v`
 |   +-- spark-entrypoint.sh     # Spark master/worker entrypoint
+|   +-- olist_prepare.py        # Olist CSV -> Parquet (DuckDB): dims + orders
+|   +-- olist_load_postgres.py  # Olist dims -> PostgreSQL (categories/products/users)
+|   +-- olist_amplify.py        # Amplify 98k real orders -> 1,000,000
+|   +-- run_olist_backfill.sh   # One-shot: prepare -> dims -> amplify -> backfill -> DAG
 |
 +-- spark_jobs/                 # Run inside spark-master (Airflow docker exec)
 |   +-- bronze_ingestion.py     # Kafka CDC -> MinIO Bronze (raw Parquet)
+|   +-- backfill_olist.py       # Olist Parquet -> Bronze (Debezium-shaped envelope)
 |   +-- dim_snapshot.py         # Postgres -> Silver dim_* (SCD snapshot)
 |   +-- silver_transform.py     # Bronze -> Silver orders_clean (join, dedup)
 |   +-- gold_aggregation.py     # Silver -> Gold KPI/feature tables
@@ -86,11 +134,13 @@ inference in <100 ms).
 ### 0. Prerequisites
 
 ```bash
-cp .env.example .env    # then fill in strong passwords
-docker compose version   # Docker Compose v2+
+cp .env.example .env                        # then fill in strong passwords
+python -m pip install -r requirements.txt   # host scripts (mock_data, olist_*)
+docker compose version                      # Docker Compose v2+
 ```
 
 > `.env` holds the real credentials and is gitignored - never commit it.
+> `Dataset/` and `data/` are gitignored too: the repo ships **code only**.
 
 ### 1. Start the whole stack
 
@@ -99,14 +149,24 @@ docker compose up -d --build    # --build only needed the first time
 docker compose ps               # wait until services are healthy (~2-3 min)
 ```
 
-### 2. Register CDC and start generating data
+### 2. Load the historical dataset (optional, recommended)
+
+Needs the Olist CSVs in `Dataset/` (see the Dataset section above).
 
 ```bash
-bash scripts/register_cdc.sh    # registers Debezium connector -> pg.public.orders
-python scripts/mock_data.py --interval 2.0 --update-ratio 0.3   # continuous traffic
+# CSV -> Parquet -> Postgres dims -> amplify to 1,000,000 -> Bronze -> Silver -> Gold
+SAMPLE=5000 TARGET=50000 bash scripts/run_olist_backfill.sh   # quick smoke test
+bash scripts/run_olist_backfill.sh                            # full 1,000,000 orders
 ```
 
-### 3. Enable the pipelines in Airflow
+### 3. Register CDC and start generating realtime traffic
+
+```bash
+bash scripts/register_cdc.sh            # Debezium connector -> pg.public.orders
+python scripts/mock_data.py --rate 20   # 20 events/s, sampled from real Olist orders
+```
+
+### 4. Enable the pipelines in Airflow
 
 Open http://localhost:8085 (`AIRFLOW_ADMIN_USER` / `AIRFLOW_ADMIN_PASSWORD`) and
 **unpause the two DAGs**:
@@ -126,7 +186,7 @@ While running, Airflow `docker exec`s into `spark-master` to `spark-submit` and
 into `flink-jobmanager` to `flink run` (see `Dockerfile.airflow` - the image
 adds the docker CLI reading `/var/run/docker.sock`).
 
-### 4. Verify the data
+### 5. Verify the data
 
 ```bash
 # Realtime - ClickHouse (per-product, produced by Flink)

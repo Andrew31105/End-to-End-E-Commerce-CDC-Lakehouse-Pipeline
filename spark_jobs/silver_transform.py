@@ -196,7 +196,19 @@ def main():
             cdc_op        STRING,
             ingested_at   TIMESTAMP
         ) USING iceberg
-        PARTITIONED BY (days(ordered_at))
+        PARTITIONED BY (months(ordered_at))
+    """)
+
+    # Iceberg mở 1 Parquet writer cho MỖI partition mà một task gặp phải (fanout).
+    # Partition theo NGÀY ⇒ backfill 24 tháng tạo ~730 partition, mỗi task phải
+    # mở hàng trăm writer song song → tràn heap executor.
+    #   • Partition theo THÁNG ⇒ chỉ ~24 partition cho 2 năm lịch sử, số writer
+    #     mở đồng thời luôn bị chặn trên rất thấp.
+    #   • Thêm 'range' để Spark cắt dữ liệu theo khoảng thời gian liên tục trước
+    #     khi ghi, giảm tiếp số partition mà mỗi task chạm tới.
+    spark.sql("""
+        ALTER TABLE iceberg.silver.orders_clean
+        SET TBLPROPERTIES ('write.distribution-mode' = 'range')
     """)
 
     target_df = (

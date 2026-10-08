@@ -10,13 +10,16 @@
 #    ML demo           : pip install -r ml/requirements.txt
 # ============================================================
 
-# Sinh dữ liệu giả (scripts/mock_data.py)
+# Sinh traffic realtime (scripts/mock_data.py) – đọc/ghi PostgreSQL
 psycopg2-binary==2.9.9
-faker==25.2.0
 
 # Đọc .env khi chạy tool trên host
 python-dotenv==1.0.1
 
+# Pipeline nạp dataset Olist (scripts/olist_*.py)
+duckdb==1.5.6          # CSV -> Parquet + lấy mẫu đơn Olist cho generator
+pandas==2.2.3
+pyarrow==23.0.0        # pandas.read_parquet trong olist_load_postgres.py
+
 # Tuỳ chọn: debug thủ công ClickHouse trên host
 clickhouse-driver==0.2.6
-pandas==2.2.3

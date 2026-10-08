@@ -231,6 +231,7 @@ services:
       - ./scripts:/opt/spark/scripts
       - ./configs/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf
       - ./data/iceberg:/tmp/iceberg
+      - ./data/olist:/opt/spark/data/olist:ro   # Parquet backfill (Olist)
     depends_on:
       minio-init:
         condition: service_completed_successfully
@@ -260,6 +261,7 @@ services:
       - ./spark_jobs:/opt/spark/jobs
       - ./configs/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf
       - ./data/iceberg:/tmp/iceberg
+      - ./data/olist:/opt/spark/data/olist:ro   # Parquet backfill (Olist)
     depends_on:
       - spark-master
       - minio-init

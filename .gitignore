@@ -15,10 +15,27 @@ venv/
 .vscode/
 .idea/
 
-# Data (mounted volumes)
-data/minio/
-data/iceberg/
-data/superset_home/
+# ============================================================
+# Dữ liệu & file sinh ra khi chạy – KHÔNG commit
+# ============================================================
+# data/ chỉ là mount cho container (MinIO, Iceberg, Superset metadata) và output
+# của pipeline (Parquet Olist đã chuẩn hóa + 1 triệu đơn đã amplify ~45MB).
+# Giữ data/.gitkeep để thư mục tồn tại sẵn với quyền của user (nếu để Docker tự
+# tạo, bind mount sẽ thuộc root và script không ghi được).
+data/*
+!data/.gitkeep
+
+# Dataset Olist gốc (Kaggle, CC BY-NC-SA 4.0, ~121MB) – tải riêng, không commit
+Dataset/
+
+# CSV/zip/parquet lẫn ở gốc repo hoặc ngoài data/
+/*.csv
+*.zip
+*.parquet
+
+# OS / tạm
+.DS_Store
+*.log
 
 # Docker volumes
 pgdata/

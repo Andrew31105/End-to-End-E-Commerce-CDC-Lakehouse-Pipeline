@@ -1,0 +1,2 @@
+Placeholder để thư mục data/ tồn tại sẵn trong repo với quyền của user.
+Toàn bộ nội dung khác trong data/ bị .gitignore loại bỏ (mount volume + dữ liệu sinh ra khi chạy).

@@ -43,6 +43,20 @@ def ensure_schemas(spark: SparkSession) -> None:
         spark.sql(f"CREATE NAMESPACE IF NOT EXISTS {namespace}")
 
 
+def set_write_distribution(spark: SparkSession, table: str) -> None:
+    """Buộc Spark phân phối dữ liệu theo partition key trước khi ghi.
+
+    Iceberg mở một Parquet writer cho MỖI partition mà task gặp (fanout). Với
+    backfill lịch sử 24 tháng, nếu partition quá mịn thì một task phải mở hàng
+    trăm writer ⇒ tràn heap. 'range' giúp Spark cắt dữ liệu thành các khoảng
+    thời gian liên tục nên mỗi task chỉ ghi vài partition.
+    """
+    spark.sql(
+        f"ALTER TABLE {table} "
+        "SET TBLPROPERTIES ('write.distribution-mode' = 'range')"
+    )
+
+
 def build_city_kpis(spark: SparkSession, df: DataFrame) -> None:
     valid_orders = df.filter(~col("status").isin("cancelled", "returned"))
 
@@ -72,8 +86,9 @@ def build_city_kpis(spark: SparkSession, df: DataFrame) -> None:
             order_count     BIGINT,
             avg_order_value DECIMAL(12, 2)
         ) USING iceberg
-        PARTITIONED BY (hours(window_start))
+        PARTITIONED BY (months(window_start))
     """)
+    set_write_distribution(spark, "iceberg.gold.city_revenue_hourly")
 
     spark.sql("""
         MERGE INTO iceberg.gold.city_revenue_hourly AS target
@@ -126,8 +141,9 @@ def build_category_kpis(spark: SparkSession, df: DataFrame) -> None:
             total_revenue   DECIMAL(18, 2),
             order_count     BIGINT
         ) USING iceberg
-        PARTITIONED BY (hours(window_start))
+        PARTITIONED BY (months(window_start))
     """)
+    set_write_distribution(spark, "iceberg.gold.category_revenue_hourly")
 
     spark.sql("""
         MERGE INTO iceberg.gold.category_revenue_hourly AS target

@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS iceberg.bronze.orders_raw (
     after           STRUCT<
                         id: INT,
                         user_id: INT,
-                        product_id: INT,
+                        product_id: INT,    
                         quantity: INT,
                         unit_price: DECIMAL(10, 2),
                         total_amount: DECIMAL(10, 2),
@@ -98,7 +98,10 @@ CREATE TABLE IF NOT EXISTS iceberg.silver.orders_clean (
     cdc_op          STRING,       -- 'c' = create, 'u' = update, 'd' = delete
     ingested_at     TIMESTAMP
 ) USING iceberg
-PARTITIONED BY (days(ordered_at));
+-- months(): 24 tháng lịch sử chỉ tạo ~24 partition. Nếu partition theo NGÀY,
+-- backfill tạo ~730 partition và Iceberg mở 1 Parquet writer cho mỗi partition
+-- trong cùng 1 task (fanout) -> tràn heap executor.
+PARTITIONED BY (months(ordered_at));
 
 -- ========================
 -- Gold Layer (Aggregated)
@@ -112,7 +115,7 @@ CREATE TABLE IF NOT EXISTS iceberg.gold.city_revenue_hourly (
     order_count     BIGINT,
     avg_order_value DECIMAL(12, 2)
 ) USING iceberg
-PARTITIONED BY (hours(window_start));
+PARTITIONED BY (months(window_start));
 
 -- Revenue KPI by category (hourly)
 CREATE TABLE IF NOT EXISTS iceberg.gold.category_revenue_hourly (
@@ -122,7 +125,7 @@ CREATE TABLE IF NOT EXISTS iceberg.gold.category_revenue_hourly (
     total_revenue   DECIMAL(18, 2),
     order_count     BIGINT
 ) USING iceberg
-PARTITIONED BY (hours(window_start));
+PARTITIONED BY (months(window_start));
 
 -- Product popularity features
 CREATE TABLE IF NOT EXISTS iceberg.gold.product_features_daily (

@@ -6,7 +6,6 @@
 
 set -euo pipefail
 
-# Nạp biến môi trường từ .env (chạy từ thư mục gốc dự án)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -f "${SCRIPT_DIR}/../.env" ]; then
     set -a
@@ -22,7 +21,6 @@ until curl -s "${DEBEZIUM_URL}/connectors" > /dev/null 2>&1; do
 done
 echo " Debezium Connect đã sẵn sàng!"
 
-# Xoá connector cũ nếu tồn tại
 curl -s -X DELETE "${DEBEZIUM_URL}/connectors/ecommerce-pg-connector" > /dev/null 2>&1 || true
 
 echo "Đang đăng ký PostgreSQL CDC connector cho Flink..."

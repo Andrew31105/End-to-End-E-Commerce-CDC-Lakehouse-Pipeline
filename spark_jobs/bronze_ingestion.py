@@ -34,6 +34,20 @@ from pyspark.sql.types import (
 
 from feature_store.config import get_spark_session
 
+# Schema 1 bản ghi đơn hàng trong envelope Debezium (before/after).
+# Dùng chung cho cả luồng CDC thật và luồng backfill (backfill_olist.py).
+ORDER_RECORD_SCHEMA = StructType([
+    StructField("id", IntegerType(), False),
+    StructField("user_id", IntegerType(), True),
+    StructField("product_id", IntegerType(), True),
+    StructField("quantity", IntegerType(), True),
+    StructField("unit_price", DecimalType(10, 2), True),
+    StructField("total_amount", DecimalType(10, 2), True),
+    StructField("status", StringType(), True),
+    StructField("ordered_at", StringType(), True),
+    StructField("updated_at", StringType(), True),
+])
+
 
 def ensure_bronze_schema(spark) -> None:
     """Tạo namespace + table nếu chưa tồn tại (schema khớp sql/iceberg_ddl.sql).
@@ -98,17 +112,7 @@ def main():
         .load()
     )
 
-    order_record_schema = StructType([
-        StructField("id", IntegerType(), False),
-        StructField("user_id", IntegerType(), True),
-        StructField("product_id", IntegerType(), True),
-        StructField("quantity", IntegerType(), True),
-        StructField("unit_price", DecimalType(10, 2), True),
-        StructField("total_amount", DecimalType(10, 2), True),
-        StructField("status", StringType(), True),
-        StructField("ordered_at", StringType(), True),
-        StructField("updated_at", StringType(), True),
-    ])
+    order_record_schema = ORDER_RECORD_SCHEMA
 
     debezium_schema =  StructType([
             StructField("before", order_record_schema, True),
