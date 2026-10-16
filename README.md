@@ -337,17 +337,30 @@ docker compose down -v                                      # stop + delete volu
 
 **Notable gotchas**
 
-- Airflow runs Spark jobs via `docker exec spark-master spark-submit` with
-  `--conf spark.jars.ivy=/tmp/.ivy2` (the `spark` user has `HOME=/nonexistent`)
-  and `--packages` for the Kafka/Postgres jars. Never run the Bronze job
-  manually at the same time as Airflow (shared streaming `availableNow`
-  checkpoint).
+- Airflow runs Spark jobs via `docker exec spark-master spark-submit` (no
+  `--packages`: the Kafka connector + Postgres JDBC jars are baked into
+  `Dockerfile.spark`). Two parallel `--packages` submits used to race on the
+  shared Ivy cache (`/tmp/.ivy2`) and one would fail with
+  `impossible to move part file to definitive one` / `UNRESOLVED DEPENDENCIES`;
+  baking the jars also removes the internet dependency at job time. Never run
+  the Bronze job manually at the same time as Airflow (shared streaming
+  `availableNow` checkpoint).
+- The Debezium connector lives inside the `connect` container (no volume), so
+  after a Kafka/Connect recreate the CDC topic disappears and Bronze fails with
+  `UnknownTopicOrPartitionException` - re-run `bash scripts/register_cdc.sh`.
 - Flink uses **processing time** (`PROCTIME`) because event-time watermarks
   never fire on a column computed from a nested `ROW`; the ClickHouse sink goes
   through a **Kafka engine + materialized view** because `flink-connector-jdbc`
   has no ClickHouse dialect.
 - The `iceberg.views` schema can occasionally disappear (Bronze/Silver/Gold
   tables remain) - recreate the schema and re-run `sql/trino_views.sql`.
+- `docker compose stop` / `down` (no `-v`) keeps every volume, so restarting the
+  stack is safe: the `hive-metastore` entrypoint checks the schema first
+  (`schematool -dbType postgres -info`) and only runs `-initSchema` when the
+  `hive_pgdata` volume is empty, otherwise it reuses the existing metadata.
+  A version mismatch (volume built by a different Hive image) fails fast with a
+  `-upgradeSchema` hint instead of the misleading `relation "BUCKETING_COLS"
+  already exists` error.
 
 ## Completed
 

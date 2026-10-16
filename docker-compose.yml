@@ -175,7 +175,17 @@ services:
         if [ ! -f /opt/apache-hive-metastore-3.0.0-bin/lib/postgresql-42.7.4.jar ]; then
           curl -fsSL https://jdbc.postgresql.org/download/postgresql-42.7.4.jar -o /opt/apache-hive-metastore-3.0.0-bin/lib/postgresql-42.7.4.jar;
         fi;
-        /opt/apache-hive-metastore-3.0.0-bin/bin/schematool -initSchema -dbType postgres;
+        /opt/apache-hive-metastore-3.0.0-bin/bin/schematool -dbType postgres -info >/tmp/schema-info.log 2>&1 || true;
+        if grep -q 'is not compatible' /tmp/schema-info.log; then
+          grep 'is not compatible' /tmp/schema-info.log;
+          echo 'ERROR: metastore schema version mismatch -> run schematool -upgradeSchema, or docker compose down -v to rebuild (loses Iceberg metadata)';
+          exit 1;
+        elif grep -q 'Metastore schema version:' /tmp/schema-info.log; then
+          echo 'Metastore schema already initialized -> skipping -initSchema (existing volume reused)';
+        else
+          echo 'Metastore schema not initialized -> running schematool -initSchema';
+          /opt/apache-hive-metastore-3.0.0-bin/bin/schematool -initSchema -dbType postgres;
+        fi;
         /opt/apache-hive-metastore-3.0.0-bin/bin/start-metastore
       "
     ports:

@@ -3,10 +3,10 @@ from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.bash import BashOperator
 
+# Jar Kafka connector + Postgres JDBC đã bake sẵn trong image spark
+# (Dockerfile.spark) nên KHÔNG dùng `--packages`: nếu dùng, các task chạy song song
+# sẽ cùng resolve vào một Ivy cache dùng chung và race nhau.
 EXEC = ('docker exec spark-master /opt/spark/bin/spark-submit '
-        '--conf spark.jars.ivy=/tmp/.ivy2 '
-        '--packages "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,'
-        'org.postgresql:postgresql:42.7.4" '
         '--master spark://spark-master:7077 /opt/spark/jobs/')
 
 default_args = {
