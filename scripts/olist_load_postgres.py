@@ -59,6 +59,22 @@ def upsert_table(cur, table: str, columns: list[str], frame: pd.DataFrame) -> in
     return len(rows)
 
 
+def sync_sequences(cur) -> None:
+    """Đẩy sequence SERIAL vượt id lớn nhất vừa nạp.
+
+    Olist dùng dải id offset (categories 1.000+, products 100.000+,
+    users 1.000.000+). Nếu không setval, INSERT tiếp theo sẽ cấp id 6, 7…
+    và sẽ đụng id Olist sau một thời gian chạy mock.
+    """
+    for table in LOAD_ORDER:
+        cur.execute(
+            f"""SELECT setval(
+                    pg_get_serial_sequence('{table}', 'id'),
+                    GREATEST(COALESCE((SELECT max(id) FROM {table}), 1), 1)
+                )"""
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Nạp dimension Olist vào PostgreSQL")
     parser.add_argument("--prepared", default="data/olist/prepared",
@@ -84,6 +100,9 @@ def main() -> None:
                 frame = pd.read_parquet(path)
                 inserted = upsert_table(cur, table, columns, frame)
                 print(f"  - {table:<11} {inserted:>8,} dòng  ←  {filename}")
+
+            sync_sequences(cur)
+            print("  - sequences    đã setval theo max(id)")
         conn.commit()
     except Exception:
         conn.rollback()

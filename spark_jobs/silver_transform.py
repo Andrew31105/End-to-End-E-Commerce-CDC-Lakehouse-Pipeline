@@ -109,22 +109,9 @@ def main():
         )
     )
 
-    deleted_ids_df = (
-        bronze_df
-        .filter(col("op") == "d")
-        .select(
-                col("before.id").alias("order_id"),
-                col("before.user_id").alias("user_id"),
-                col("before.product_id").alias("product_id"),
-                col("before.quantity").alias("quantity"),
-                col("before.unit_price").alias("unit_price"),
-                col("before.total_amount").alias("total_amount"),
-                col("before.status").alias("status"),
-                col("before.ordered_at").alias("order_at"),
-                col("before.updated_at").alias("updated_at"),
-        )
-        
-    )
+    # Hard delete (op='d') hiện chưa được xử lý: luồng demo không xoá đơn và
+    # bảng Silver giữ trạng thái cuối theo order_id. Nếu cần soft-delete, thêm
+    # status='deleted' và đồng bộ filter ở Gold (đừng chỉ thêm MERGE ở đây).
 
     type_df = (
         flattened_df

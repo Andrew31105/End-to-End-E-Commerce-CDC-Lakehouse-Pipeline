@@ -21,28 +21,21 @@ CREATE TABLE IF NOT EXISTS ecommerce.order_events (
 ) ENGINE = ReplacingMergeTree()
 ORDER BY id;
 
--- (2) Revenue per minute × category (Materialized View)
-CREATE MATERIALIZED VIEW IF NOT EXISTS ecommerce.revenue_per_minute_mv
-ENGINE = SummingMergeTree()
-ORDER BY (window_start, category_id)
-AS SELECT
-    toStartOfMinute(processed_at) AS window_start,
-    0 AS category_id,  -- TODO: join với product dimension
-    sum(total_amount) AS total_revenue,
-    count() AS order_count, 
-    avg(total_amount) AS avg_order_value
-FROM ecommerce.order_events
-WHERE status NOT IN ('cancelled', 'returned')
-GROUP BY window_start;
+-- (2) Revenue per minute × category: CHƯA triển khai ở ClickHouse.
+--     order_events không có category_id nên không thể tính đúng tại đây;
+--     realtime theo product/category do Flink tính (flink_jobs/window_aggregates.sql),
+--     batch theo category do Gold (iceberg.gold.category_revenue_hourly) phụ trách.
 
 -- (3) Order status real-time count
+--     AggregatingMergeTree BẮT BUỘC dùng hàm -State, nếu dùng count() thường
+--     engine sẽ không merge. Đọc bằng: countMerge(status_count).
 CREATE MATERIALIZED VIEW IF NOT EXISTS ecommerce.order_status_mv
 ENGINE = AggregatingMergeTree()
 ORDER BY (window_start, status)
 AS SELECT
     toStartOfMinute(processed_at) AS window_start,
     status,
-    count() AS status_count
+    countState() AS status_count
 FROM ecommerce.order_events
 GROUP BY window_start, status;
 

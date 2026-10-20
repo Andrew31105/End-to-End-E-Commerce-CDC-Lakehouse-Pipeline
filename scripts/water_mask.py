@@ -71,9 +71,12 @@ def get_current_snapshot_id(
             LIMIT 1
         """).collect()
         return str(rows[0]["snapshot_id"]) if rows else None
-    except Exception as e:
-        print(f"Error reading current snapshot of '{table_name}': {e}")
-        return None
+    except Exception as exc:
+        # Lần chạy đầu bảng chưa tồn tại là bình thường. Lỗi khác (quyền,
+        # metastore, S3) phải nổi lên để DAG fail thay vì âm thầm bỏ qua.
+        if "TABLE_OR_VIEW_NOT_FOUND" in str(exc) or "NoSuchTable" in type(exc).__name__:
+            return None
+        raise
 
 
 def read_new_spark(

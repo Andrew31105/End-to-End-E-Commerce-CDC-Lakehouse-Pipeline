@@ -175,7 +175,10 @@ services:
         if [ ! -f /opt/apache-hive-metastore-3.0.0-bin/lib/postgresql-42.7.4.jar ]; then
           curl -fsSL https://jdbc.postgresql.org/download/postgresql-42.7.4.jar -o /opt/apache-hive-metastore-3.0.0-bin/lib/postgresql-42.7.4.jar;
         fi;
-          /opt/apache-hive-metastore-3.0.0-bin/bin/schematool -initSchema -dbType postgres;
+        # Chỉ init schema khi DB chưa có; -initSchema trên schema đã tồn tại
+        # sẽ fail và với `set -e` container sẽ không start được.
+        /opt/apache-hive-metastore-3.0.0-bin/bin/schematool -dbType postgres -info >/dev/null 2>&1 ||
+          /opt/apache-hive-metastore-3.0.0-bin/bin/schematool -dbType postgres -initSchema;
         /opt/apache-hive-metastore-3.0.0-bin/bin/start-metastore
       "
     ports:
@@ -400,7 +403,9 @@ services:
     environment:
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASSWORD}@airflow-postgres:5432/${AIRFLOW_DB}
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
-    entrypoint: /bin/bash -c "airflow db init && airflow users create --username ${AIRFLOW_ADMIN_USER} --firstname Admin --lastname User --role Admin --email admin@example.com --password ${AIRFLOW_ADMIN_PASSWORD}"
+    # || true: lần `up` thứ 2 user đã tồn tại → `users create` exit 1 sẽ chặn
+    # webserver/scheduler qua depends_on service_completed_successfully.
+    entrypoint: /bin/bash -c "airflow db init && (airflow users create --username ${AIRFLOW_ADMIN_USER} --firstname Admin --lastname User --role Admin --email admin@example.com --password ${AIRFLOW_ADMIN_PASSWORD} || true)"
     volumes:
       - ./airflow/dags:/opt/airflow/dags
 
