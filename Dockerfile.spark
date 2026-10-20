@@ -30,20 +30,6 @@ RUN wget -q -P /opt/spark/jars/ \
     wget -q -P /opt/spark/jars/ \
     https://repo1.maven.org/maven2/software/amazon/awssdk/regions/2.25.27/regions-2.25.27.jar
 
-# Kafka connector (bronze CDC) + Postgres JDBC (dim snapshot) — bake vào image để
-# spark-submit chạy job KHÔNG cần `--packages`: nhiều task Airflow chạy song song
-# cùng resolve --packages vào một Ivy cache dùng chung sẽ race (lỗi
-# "impossible to move part file to definitive one" -> UNRESOLVED DEPENDENCIES),
-# và job cũng không còn phụ thuộc internet lúc chạy.
-# spark-sql-kafka cần: spark-token-provider-kafka, kafka-clients, commons-pool2
-# (snappy/lz4/slf4j đã có sẵn trong image).
-RUN wget -q -P /opt/spark/jars/ \
-    https://repo1.maven.org/maven2/org/apache/spark/spark-sql-kafka-0-10_2.12/3.5.1/spark-sql-kafka-0-10_2.12-3.5.1.jar \
-    https://repo1.maven.org/maven2/org/apache/spark/spark-token-provider-kafka-0-10_2.12/3.5.1/spark-token-provider-kafka-0-10_2.12-3.5.1.jar \
-    https://repo1.maven.org/maven2/org/apache/kafka/kafka-clients/3.4.1/kafka-clients-3.4.1.jar \
-    https://repo1.maven.org/maven2/org/apache/commons/commons-pool2/2.11.1/commons-pool2-2.11.1.jar \
-    https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.4/postgresql-42.7.4.jar
-
 # Copy entrypoint script
 COPY scripts/spark-entrypoint.sh /opt/entrypoint.sh
 RUN chmod +x /opt/entrypoint.sh

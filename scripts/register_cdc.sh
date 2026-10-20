@@ -37,7 +37,7 @@ PAYLOAD=$(cat <<EOF
     "database.dbname": "${POSTGRES_DB}",
     "database.server.name": "pg",
     "topic.prefix": "pg",
-    "table.include.list": "public.orders",
+    "table.include.list": "public.orders,public.users,public.products,public.categories",
     "plugin.name": "pgoutput",
     "slot.name": "flink_debezium_slot",
     "publication.autocreate.mode": "filtered",
