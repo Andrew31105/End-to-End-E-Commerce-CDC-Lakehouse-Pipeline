@@ -7,6 +7,8 @@ CREATE TABLE IF NOT EXISTS categories (
     id          SERIAL PRIMARY KEY,
     name        VARCHAR(100) NOT NULL UNIQUE,
     description TEXT
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW() 
 );
 
 -- 2) Sản phẩm
@@ -28,7 +30,8 @@ CREATE TABLE IF NOT EXISTS users (
     email         VARCHAR(255)  NOT NULL UNIQUE,
     phone         VARCHAR(20),
     city          VARCHAR(100),
-    created_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW() 
 );
 
 -- 4) Đơn hàng – bảng chính cho CDC
