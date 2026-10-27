@@ -47,35 +47,51 @@ PARTITIONED BY (days(ingestion_ts));
 
 -- Orders cleaned (flattened CDC + dimension joins)
 
-CREATE TABLE IF NOT EXISTS iceberg.silver.dim_users_current (
-    user_id         BIGINT,
-    full_name       STRING,
-    email           STRING,
-    phone           STRING,
-    city            STRING,
-    source_created_at TIMESTAMP,
-    snapshot_ts     TIMESTAMP
+CREATE TABLE IF NOT EXISTS iceberg.silver.dim_users_hist (
+    user_sk       BIGINT,
+    user_id       BIGINT,
+    full_name     STRING,
+    email         STRING,
+    phone         STRING,
+    city          STRING,
+    source_ts     TIMESTAMP,
+    valid_from    TIMESTAMP,
+    valid_to      TIMESTAMP,
+    is_current    BOOLEAN,
+    row_hash      STRING,
+    cdc_op        STRING,
+    ingested_at   TIMESTAMP
 ) USING iceberg;
 
-CREATE TABLE IF NOT EXISTS iceberg.silver.dim_categories_current (
-    category_id     INT,
-    category_name   STRING,
-    description     STRING,
-    snapshot_ts     TIMESTAMP
+CREATE TABLE IF NOT EXISTS iceberg.silver.dim_categories_hist (
+    category_sk   BIGINT,
+    category_id   INT,
+    category_name STRING,
+    description   STRING,
+    source_ts     TIMESTAMP,
+    valid_from    TIMESTAMP,
+    valid_to      TIMESTAMP,
+    is_current    BOOLEAN,
+    row_hash      STRING,
+    cdc_op        STRING,
+    ingested_at   TIMESTAMP
 ) USING iceberg;
 
-CREATE TABLE IF NOT EXISTS iceberg.silver.dim_products_current (
-    product_id      BIGINT,
-    product_name    STRING,
-    category_id     INT,
-    base_price      DECIMAL(12, 2),
-    stock           INT,
-    is_active       BOOLEAN,
-    source_created_at TIMESTAMP,
-    source_updated_at TIMESTAMP,
-    snapshot_ts     TIMESTAMP
+CREATE TABLE IF NOT EXISTS iceberg.silver.dim_products_hist (
+    product_sk    BIGINT,
+    product_id    BIGINT,
+    product_name  STRING,
+    category_id   INT,
+    base_price    DECIMAL(12, 2),
+    is_active     BOOLEAN,
+    source_ts     TIMESTAMP,
+    valid_from    TIMESTAMP,
+    valid_to      TIMESTAMP,
+    is_current    BOOLEAN,
+    row_hash      STRING,
+    cdc_op        STRING,
+    ingested_at   TIMESTAMP
 ) USING iceberg;
-
 
 
 
