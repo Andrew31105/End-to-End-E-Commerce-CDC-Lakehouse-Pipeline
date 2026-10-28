@@ -54,9 +54,9 @@ CREATE INDEX IF NOT EXISTS idx_orders_updated_at  ON orders(updated_at);
 CREATE INDEX IF NOT EXISTS idx_orders_user_id     ON orders(user_id);
 CREATE INDEX IF NOT EXISTS idx_orders_product_id  ON orders(product_id);
 
-ALTER TABLE categories REPLICA IDENTITY DEFAULT;
-ALTER TABLE products REPLICA IDENTITY DEFAULT;
-ALTER TABLE users REPLICA IDENTITY DEFAULT;
+ALTER TABLE categories REPLICA IDENTITY FULL;
+ALTER TABLE products   REPLICA IDENTITY FULL;
+ALTER TABLE users      REPLICA IDENTITY FULL;
 ALTER TABLE orders REPLICA IDENTITY FULL;
 -- ============================================================
 -- Seed data mẫu (dữ liệu tĩnh ban đầu)
