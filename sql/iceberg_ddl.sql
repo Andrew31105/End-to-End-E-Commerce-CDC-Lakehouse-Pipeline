@@ -112,7 +112,11 @@ CREATE TABLE IF NOT EXISTS iceberg.silver.orders_clean (
     ordered_at      TIMESTAMP,
     updated_at      TIMESTAMP,
     cdc_op          STRING,       -- 'c' = create, 'u' = update, 'd' = delete
-    ingested_at     TIMESTAMP
+    ingested_at     TIMESTAMP,
+    product_sk      BIGINT,       -- SCD2: version của product tại ordered_at
+    category_sk     BIGINT,       -- SCD2: version của category tại ordered_at
+    user_sk         BIGINT,       -- SCD2: version của user tại ordered_at
+    dim_match_type  STRING        -- exact | inferred | partial | missing
 ) USING iceberg
 -- months(): 24 tháng lịch sử chỉ tạo ~24 partition. Nếu partition theo NGÀY,
 -- backfill tạo ~730 partition và Iceberg mở 1 Parquet writer cho mỗi partition

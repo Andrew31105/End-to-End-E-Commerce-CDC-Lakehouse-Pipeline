@@ -10,7 +10,17 @@
 import os
 import sys
 
-from pyspark.sql.functions import col, to_timestamp, coalesce, lit, row_number, desc, current_timestamp
+from pyspark.sql.functions import (
+    broadcast,
+    coalesce,
+    col,
+    current_timestamp,
+    desc,
+    lit,
+    row_number,
+    to_timestamp,
+    when,
+)
 from pyspark.sql.types import (
     StructType,
     StructField,
@@ -32,27 +42,145 @@ from scripts.water_mask import read_new_spark, write_watermark
 
 bronze_table = "iceberg.bronze.orders_raw"
 
+ORDERS_TABLE = "iceberg.silver.orders_clean"
+HIST_TABLES = {
+    "product": "iceberg.silver.dim_products_hist",
+    "category": "iceberg.silver.dim_categories_hist",
+    "user": "iceberg.silver.dim_users_hist",
+}
+
+# valid_from của version bootstrap (xem dim_scd2.py) → đánh dấu "inferred"
+BOOTSTRAP_VALID_FROM = "1900-01-01 00:00:00"
+
+# Cột SCD2 thêm vào orders_clean (bảng cũ sẽ được ALTER idempotent)
+SCD2_COLUMNS = {
+    "product_sk": "BIGINT",
+    "category_sk": "BIGINT",
+    "user_sk": "BIGINT",
+    "dim_match_type": "STRING",
+}
+
+
+def ensure_dim_history(spark: SparkSession) -> None:
+    """Fail-fast nếu SCD2 chưa chạy.
+
+    Join với bảng hist rỗng sẽ trả NULL âm thầm → dashboard mất doanh thu
+    theo city/category mà không ai biết. Thà fail sớm với thông báo rõ.
+    """
+    for table in HIST_TABLES.values():
+        try:
+            has_rows = spark.read.table(table).limit(1).count() > 0
+        except Exception as exc:
+            raise RuntimeError(
+                f"[Silver] Không đọc được {table}: {exc}. "
+                "Chạy spark_jobs/dim_scd2.py trước."
+            ) from exc
+        if not has_rows:
+            raise RuntimeError(
+                f"[Silver] {table} rỗng – chạy spark_jobs/dim_scd2.py trước."
+            )
+
+
 def join_dimension(df: DataFrame, spark: SparkSession) -> DataFrame:
-        products_df = spark.read.table("iceberg.silver.dim_products_current")
-        categories_df = spark.read.table("iceberg.silver.dim_categories_current")
-        users_df = spark.read.table("iceberg.silver.dim_users_current")
+    """Point-in-time join orders với 3 dimension SCD2.
 
-        joined_df1 = (
-            df.join(products_df, df.product_id == products_df.product_id, "left")
-            .drop(products_df.product_id)
-        )
+    Chuỗi join (điểm dễ sai nhất):
+      1. orders → product version tại `order_at`
+      2. product version → category version tại **cùng** `order_at`
+         (khoá join là p.category_id của PRODUCT VERSION, không phải từ orders)
+      3. orders → user version tại `order_at`
 
-        joined_df2 = (
-            joined_df1.join(categories_df, joined_df1.category_id == categories_df.category_id, "left")
-            .drop(categories_df.category_id)
-        )
-        joined_df3 = (
-            joined_df2.join(users_df, joined_df2.user_id == users_df.user_id, "left")
-            .drop(users_df.user_id)
-        )
+    Điều kiện thời gian luôn là `valid_from <= order_at < valid_to`.
+    """
+    orders = df.alias("o")
+
+    with_product = orders.join(
+        broadcast(spark.read.table(HIST_TABLES["product"])).alias("p"),
+        (col("o.product_id") == col("p.product_id"))
+        & (col("o.order_at") >= col("p.valid_from"))
+        & (col("o.order_at") < col("p.valid_to")),
+        "left",
+    )
+
+    # SCD2 #2: category theo thời điểm đặt, khoá lấy từ version của product.
+    with_category = with_product.join(
+        broadcast(spark.read.table(HIST_TABLES["category"])).alias("c"),
+        (col("p.category_id") == col("c.category_id"))
+        & (col("o.order_at") >= col("c.valid_from"))
+        & (col("o.order_at") < col("c.valid_to")),
+        "left",
+    )
+
+    with_user = with_category.join(
+        broadcast(spark.read.table(HIST_TABLES["user"])).alias("u"),
+        (col("o.user_id") == col("u.user_id"))
+        & (col("o.order_at") >= col("u.valid_from"))
+        & (col("o.order_at") < col("u.valid_to")),
+        "left",
+    )
+
+    bootstrap = lit(BOOTSTRAP_VALID_FROM).cast("timestamp")
+    is_inferred = (
+        (col("p.valid_from") == bootstrap)
+        | (col("c.valid_from") == bootstrap)
+        | (col("u.valid_from") == bootstrap)
+    )
+
+    return with_user.select(
+        col("o.*"),
+        col("p.product_sk"),
+        col("p.product_name"),
+        col("c.category_sk"),
+        # Nếu category hist thiếu key thì vẫn giữ category_id của product version
+        coalesce(col("c.category_id"), col("p.category_id")).alias("category_id"),
+        col("c.category_name"),
+        col("u.user_sk"),
+        col("u.city"),
+        when(col("p.product_sk").isNull(), "missing")
+        .when(col("c.category_sk").isNull() | col("u.user_sk").isNull(), "partial")
+        .when(is_inferred, "inferred")
+        .otherwise("exact")
+        .alias("dim_match_type"),
+    )
 
 
-        return joined_df3
+def ensure_orders_schema(spark: SparkSession) -> None:
+    """Tạo bảng orders_clean + bổ sung cột SCD2 cho bảng đã tồn tại."""
+    spark.sql(f"""
+        CREATE TABLE IF NOT EXISTS {ORDERS_TABLE} (
+            order_id        BIGINT,
+            user_id         BIGINT,
+            product_id      BIGINT,
+            product_name    STRING,
+            category_id     INT,
+            category_name   STRING,
+            user_city       STRING,
+            quantity        INT,
+            unit_price      DECIMAL(12, 2),
+            total_amount    DECIMAL(12, 2),
+            status          STRING,
+            ordered_at      TIMESTAMP,
+            updated_at      TIMESTAMP,
+            cdc_op          STRING,
+            ingested_at     TIMESTAMP,
+            product_sk      BIGINT,
+            category_sk     BIGINT,
+            user_sk         BIGINT,
+            dim_match_type  STRING
+        ) USING iceberg
+        PARTITIONED BY (months(ordered_at))
+    """)
+
+    existing = set(spark.table(ORDERS_TABLE).columns)
+    missing = {
+        name: dtype
+        for name, dtype in SCD2_COLUMNS.items()
+        if name not in existing
+    }
+    if missing:
+        columns = ", ".join(f"{name} {dtype}" for name, dtype in missing.items())
+        spark.sql(f"ALTER TABLE {ORDERS_TABLE} ADD COLUMNS ({columns})")
+        print(f"[Silver] Added columns: {', '.join(missing)}")
 
 
 def main():
@@ -60,6 +188,9 @@ def main():
     spark = get_spark_session("Silver Transform Job")
 
     spark.sparkContext.setLogLevel("WARN")
+
+    # Fail sớm nếu dim_scd2 chưa chạy (hist rỗng → join trả NULL âm thầm)
+    ensure_dim_history(spark)
 
     order_record_schema = StructType([
         StructField("id", IntegerType(), True),
@@ -164,27 +295,8 @@ def main():
 
     joined_df = join_dimension(deduped_df, spark)
 
-    # Đảm bảo bảng target tồn tại (schema khớp với sql/iceberg_ddl.sql)
-    spark.sql("""
-        CREATE TABLE IF NOT EXISTS iceberg.silver.orders_clean (
-            order_id      BIGINT,
-            user_id       BIGINT,
-            product_id    BIGINT,
-            product_name  STRING,
-            category_id   INT,
-            category_name STRING,
-            user_city     STRING,
-            quantity      INT,
-            unit_price    DECIMAL(12, 2),
-            total_amount  DECIMAL(12, 2),
-            status        STRING,
-            ordered_at    TIMESTAMP,
-            updated_at    TIMESTAMP,
-            cdc_op        STRING,
-            ingested_at   TIMESTAMP
-        ) USING iceberg
-        PARTITIONED BY (months(ordered_at))
-    """)
+    # Tạo bảng + bổ sung cột SCD2 nếu bảng đã tồn tại
+    ensure_orders_schema(spark)
 
     # Iceberg mở 1 Parquet writer cho MỖI partition mà một task gặp phải (fanout).
     # Partition theo NGÀY ⇒ backfill 24 tháng tạo ~730 partition, mỗi task phải
@@ -215,6 +327,10 @@ def main():
             col("updated_at"),
             col("op").alias("cdc_op"),
             current_timestamp().alias("ingested_at"),
+            col("product_sk"),
+            col("category_sk"),
+            col("user_sk"),
+            col("dim_match_type"),
         )
     )
     target_df.createOrReplaceTempView("silver_orders_temp")
@@ -237,16 +353,22 @@ def main():
             ordered_at    = source.ordered_at,
             updated_at    = source.updated_at,
             cdc_op        = source.cdc_op,
-            ingested_at   = source.ingested_at
+            ingested_at   = source.ingested_at,
+            product_sk    = source.product_sk,
+            category_sk   = source.category_sk,
+            user_sk       = source.user_sk,
+            dim_match_type = source.dim_match_type
         WHEN NOT MATCHED THEN INSERT (
             order_id, user_id, product_id, product_name, category_id, category_name,
             user_city, quantity, unit_price, total_amount, status, ordered_at,
-            updated_at, cdc_op, ingested_at
+            updated_at, cdc_op, ingested_at,
+            product_sk, category_sk, user_sk, dim_match_type
         ) VALUES (
             source.order_id, source.user_id, source.product_id, source.product_name,
             source.category_id, source.category_name, source.user_city, source.quantity,
             source.unit_price, source.total_amount, source.status, source.ordered_at,
-            source.updated_at, source.cdc_op, source.ingested_at
+            source.updated_at, source.cdc_op, source.ingested_at,
+            source.product_sk, source.category_sk, source.user_sk, source.dim_match_type
         )
     """)
 
