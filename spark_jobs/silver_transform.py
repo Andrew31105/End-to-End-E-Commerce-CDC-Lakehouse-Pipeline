@@ -52,8 +52,9 @@ HIST_TABLES = {
 # valid_from của version bootstrap (xem dim_scd2.py) → đánh dấu "inferred"
 BOOTSTRAP_VALID_FROM = "1900-01-01 00:00:00"
 
-# Cột SCD2 thêm vào orders_clean (bảng cũ sẽ được ALTER idempotent)
-SCD2_COLUMNS = {
+# Cột thêm vào orders_clean (bảng cũ sẽ được ALTER idempotent)
+EXTRA_COLUMNS = {
+    "source_ts": "TIMESTAMP",   # debezium ts của event → guard cho MERGE
     "product_sk": "BIGINT",
     "category_sk": "BIGINT",
     "user_sk": "BIGINT",
@@ -163,6 +164,7 @@ def ensure_orders_schema(spark: SparkSession) -> None:
             updated_at      TIMESTAMP,
             cdc_op          STRING,
             ingested_at     TIMESTAMP,
+            source_ts       TIMESTAMP,
             product_sk      BIGINT,
             category_sk     BIGINT,
             user_sk         BIGINT,
@@ -174,7 +176,7 @@ def ensure_orders_schema(spark: SparkSession) -> None:
     existing = set(spark.table(ORDERS_TABLE).columns)
     missing = {
         name: dtype
-        for name, dtype in SCD2_COLUMNS.items()
+        for name, dtype in EXTRA_COLUMNS.items()
         if name not in existing
     }
     if missing:
@@ -327,6 +329,7 @@ def main():
             col("updated_at"),
             col("op").alias("cdc_op"),
             current_timestamp().alias("ingested_at"),
+            (col("debezium_ts_ms") / 1000).cast("timestamp").alias("source_ts"),
             col("product_sk"),
             col("category_sk"),
             col("user_sk"),
@@ -339,7 +342,10 @@ def main():
         MERGE INTO iceberg.silver.orders_clean AS target
         USING silver_orders_temp AS source
         ON target.order_id = source.order_id
-        WHEN MATCHED THEN UPDATE SET
+        WHEN MATCHED AND source.source_ts IS NOT NULL
+                     AND source.source_ts > COALESCE(
+                         target.source_ts, TIMESTAMP '1970-01-01')
+        THEN UPDATE SET
             user_id       = source.user_id,
             product_id    = source.product_id,
             product_name  = source.product_name,
@@ -354,6 +360,7 @@ def main():
             updated_at    = source.updated_at,
             cdc_op        = source.cdc_op,
             ingested_at   = source.ingested_at,
+            source_ts     = source.source_ts,
             product_sk    = source.product_sk,
             category_sk   = source.category_sk,
             user_sk       = source.user_sk,
@@ -361,13 +368,13 @@ def main():
         WHEN NOT MATCHED THEN INSERT (
             order_id, user_id, product_id, product_name, category_id, category_name,
             user_city, quantity, unit_price, total_amount, status, ordered_at,
-            updated_at, cdc_op, ingested_at,
+            updated_at, cdc_op, ingested_at, source_ts,
             product_sk, category_sk, user_sk, dim_match_type
         ) VALUES (
             source.order_id, source.user_id, source.product_id, source.product_name,
             source.category_id, source.category_name, source.user_city, source.quantity,
             source.unit_price, source.total_amount, source.status, source.ordered_at,
-            source.updated_at, source.cdc_op, source.ingested_at,
+            source.updated_at, source.cdc_op, source.ingested_at, source.source_ts,
             source.product_sk, source.category_sk, source.user_sk, source.dim_match_type
         )
     """)

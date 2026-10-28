@@ -45,6 +45,25 @@ with DAG(
     )
 
     # ------------------------------------------------------------------
+    # 2b. Bronze CDC dimension (users/categories/products)
+    #     Chuẩn bị cho phase B: dim_scd2 đọc từ Bronze thay vì JDBC.
+    # ------------------------------------------------------------------
+    bronze_dims = BashOperator(
+        task_id="bronze_dims",
+        bash_command=f"{EXEC}dim_history_bronze.py",
+        execution_timeout=timedelta(minutes=20),
+    )
+
+    # ------------------------------------------------------------------
+    # 2c. SCD Type 2 cho dimension (Postgres snapshot -> dim_*_hist)
+    # ------------------------------------------------------------------
+    dim_scd2 = BashOperator(
+        task_id="dim_scd2",
+        bash_command=f"{EXEC}dim_scd2.py",
+        execution_timeout=timedelta(minutes=20),
+    )
+
+    # ------------------------------------------------------------------
     # 3. Silver orders (Bronze -> orders_clean, join dims)
     # ------------------------------------------------------------------
     silver_orders = BashOperator(
@@ -65,4 +84,5 @@ with DAG(
     # ------------------------------------------------------------------
     # Thứ tự phụ thuộc
     # ------------------------------------------------------------------
-    [bronze_orders, dim_snapshot] >> silver_orders >> gold_aggregation
+    [bronze_orders, bronze_dims, dim_snapshot, dim_scd2] >> silver_orders \
+        >> gold_aggregation

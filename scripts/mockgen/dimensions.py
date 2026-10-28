@@ -195,14 +195,16 @@ class DimensionMutator:
         if random.random() < 0.7:
             new_city = self.values.city(exclude=self.state.users[user_id])
             self.cur.execute(
-                "UPDATE users SET city = %s WHERE id = %s", (new_city, user_id)
+                "UPDATE users SET city = %s, updated_at = NOW() WHERE id = %s",
+                (new_city, user_id),
             )
             self.state.users[user_id] = new_city
             return f"UPDATE user={user_id} city → {new_city}"
 
         new_name = self.values.user_name()
         self.cur.execute(
-            "UPDATE users SET full_name = %s WHERE id = %s", (new_name, user_id)
+            "UPDATE users SET full_name = %s, updated_at = NOW() WHERE id = %s",
+            (new_name, user_id),
         )
         return f"UPDATE user={user_id} full_name → {new_name}"
 
@@ -234,7 +236,7 @@ class DimensionMutator:
         name, description = self.state.categories[category_id]
         now = datetime.now(timezone.utc).strftime("%H:%M:%S")
         self.cur.execute(
-            "UPDATE categories SET description = %s WHERE id = %s",
+            "UPDATE categories SET description = %s, updated_at = NOW() WHERE id = %s",
             (f"{description or name} (cập nhật {now})", category_id),
         )
         return f"UPDATE category={category_id} description"

@@ -113,6 +113,7 @@ CREATE TABLE IF NOT EXISTS iceberg.silver.orders_clean (
     updated_at      TIMESTAMP,
     cdc_op          STRING,       -- 'c' = create, 'u' = update, 'd' = delete
     ingested_at     TIMESTAMP,
+    source_ts       TIMESTAMP,    -- debezium ts → guard chống event đến muộn
     product_sk      BIGINT,       -- SCD2: version của product tại ordered_at
     category_sk     BIGINT,       -- SCD2: version của category tại ordered_at
     user_sk         BIGINT,       -- SCD2: version của user tại ordered_at

@@ -199,9 +199,11 @@ def build_product_kpis(spark: SparkSession, df: DataFrame) -> None:
                 / GREATEST(COALESCE(k.order_count_30d, 0) / 30.0, 0.01)
                 AS DOUBLE
             )                                                      AS trending_score
-        FROM iceberg.silver.dim_products_current p
+        FROM iceberg.silver.dim_products_hist p
         LEFT JOIN product_kpis_src k
                ON p.product_id = k.product_id
+        WHERE p.valid_from <= CURRENT_DATE
+          AND p.valid_to   >  CURRENT_DATE
     """)
     product_features_daily.createOrReplaceTempView("product_features_src")
 
