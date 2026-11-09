@@ -51,9 +51,22 @@ PAYLOAD=$(cat <<EOF
 EOF
 )
 
-curl -s -X POST "${DEBEZIUM_URL}/connectors" \
+curl -sS -X POST "${DEBEZIUM_URL}/connectors" \
   -H "Content-Type: application/json" \
-  -d "${PAYLOAD}" | python3 -m json.tool
+  -d "${PAYLOAD}" | python3 -c '
+import json
+import sys
+
+response = json.load(sys.stdin)
+if "error_code" in response:
+    print(json.dumps(response, ensure_ascii=False, indent=2))
+    raise SystemExit(1)
+print(json.dumps({
+    "name": response.get("name"),
+    "type": response.get("type"),
+    "tasks": len(response.get("tasks", [])),
+}, ensure_ascii=False, indent=2))
+'
 
 echo ""
 echo "Cấu hình hoàn tất! Debezium đang đẩy Raw CDC Envelope vào Kafka."

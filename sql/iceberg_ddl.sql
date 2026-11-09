@@ -60,7 +60,9 @@ CREATE TABLE IF NOT EXISTS iceberg.silver.dim_users_hist (
     is_current    BOOLEAN,
     row_hash      STRING,
     cdc_op        STRING,
-    ingested_at   TIMESTAMP
+    ingested_at   TIMESTAMP,
+    source_event_id STRING,
+    closed_by_event_id STRING
 ) USING iceberg;
 
 CREATE TABLE IF NOT EXISTS iceberg.silver.dim_categories_hist (
@@ -74,7 +76,9 @@ CREATE TABLE IF NOT EXISTS iceberg.silver.dim_categories_hist (
     is_current    BOOLEAN,
     row_hash      STRING,
     cdc_op        STRING,
-    ingested_at   TIMESTAMP
+    ingested_at   TIMESTAMP,
+    source_event_id STRING,
+    closed_by_event_id STRING
 ) USING iceberg;
 
 CREATE TABLE IF NOT EXISTS iceberg.silver.dim_products_hist (
@@ -90,7 +94,9 @@ CREATE TABLE IF NOT EXISTS iceberg.silver.dim_products_hist (
     is_current    BOOLEAN,
     row_hash      STRING,
     cdc_op        STRING,
-    ingested_at   TIMESTAMP
+    ingested_at   TIMESTAMP,
+    source_event_id STRING,
+    closed_by_event_id STRING
 ) USING iceberg;
 
 

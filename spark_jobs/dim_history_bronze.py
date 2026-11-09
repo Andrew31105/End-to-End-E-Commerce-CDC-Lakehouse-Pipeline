@@ -143,12 +143,24 @@ def ensure_table(spark: SparkSession, cfg: dict) -> None:
             op              STRING,
             debezium_ts_ms  BIGINT,
             kafka_ts        TIMESTAMP,
+            kafka_partition INT,
+            kafka_offset    BIGINT,
             _raw_payload    STRING,
             ingestion_ts    TIMESTAMP,
             batch_id        STRING
         ) USING iceberg
         PARTITIONED BY (days(ingestion_ts))
     """)
+    existing = set(spark.table(cfg["table"]).columns)
+    missing = []
+    if "kafka_partition" not in existing:
+        missing.append("kafka_partition INT")
+    if "kafka_offset" not in existing:
+        missing.append("kafka_offset BIGINT")
+    if missing:
+        spark.sql(
+            f"ALTER TABLE {cfg['table']} ADD COLUMNS ({', '.join(missing)})"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +187,8 @@ def parse_envelope(raw: DataFrame, record_schema: StructType) -> DataFrame:
         .selectExpr(
             "CAST(value AS STRING) AS json_value",
             "timestamp AS kafka_ts",
+            "partition AS kafka_partition",
+            "offset AS kafka_offset",
         )
         .withColumn("data", F.from_json("json_value", envelope))
         .select(
@@ -183,6 +197,8 @@ def parse_envelope(raw: DataFrame, record_schema: StructType) -> DataFrame:
             F.col("data.op").alias("op"),
             F.col("data.ts_ms").alias("debezium_ts_ms"),
             F.col("kafka_ts"),
+            F.col("kafka_partition"),
+            F.col("kafka_offset"),
             F.col("json_value").alias("_raw_payload"),
         )
     )
@@ -192,12 +208,15 @@ def parse_envelope(raw: DataFrame, record_schema: StructType) -> DataFrame:
 # Streaming
 # ---------------------------------------------------------------------------
 def start_stream(spark: SparkSession, cfg: dict, batch_id: str):
+    target_columns = spark.table(cfg["table"]).columns
     raw = (
         spark.readStream.format("kafka")
         .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP_SERVERS)
         .option("subscribe", cfg["topic"])
         .option("startingOffsets", "earliest")
-        .option("failOnDataLoss", "false")
+        # Missing Kafka offsets mean missing dimension versions. Fail the DAG
+        # instead of silently producing an incomplete SCD2 history.
+        .option("failOnDataLoss", "true")
         .load()
     )
 
@@ -205,6 +224,9 @@ def start_stream(spark: SparkSession, cfg: dict, batch_id: str):
         parse_envelope(raw, cfg["schema"])
         .withColumn("ingestion_ts", F.current_timestamp())
         .withColumn("batch_id", F.lit(batch_id))
+        # Iceberg columns added through schema evolution are appended to the
+        # table. Always align by the actual target order before streaming write.
+        .select(*target_columns)
     )
 
     return (

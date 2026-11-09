@@ -88,8 +88,11 @@ Design decisions and honest limits:
 |
 +-- spark_jobs/                 # Run inside spark-master (Airflow docker exec)
 |   +-- bronze_ingestion.py     # Kafka CDC -> MinIO Bronze (raw Parquet)
+|   +-- dim_history_bronze.py   # Dimension CDC Kafka -> Bronze (checkpointed)
 |   +-- backfill_olist.py       # Olist Parquet -> Bronze (Debezium-shaped envelope)
-|   +-- dim_snapshot.py         # Postgres -> Silver dim_* (SCD snapshot)
+|   +-- dim_snapshot.py         # Postgres -> Silver dim_*_current (Type 1)
+|   +-- dim_scd2.py             # Bronze CDC -> Silver dim_*_hist (micro-batch)
+|   +-- scd2/                   # CDC normalization, merge, validation, config
 |   +-- silver_transform.py     # Bronze -> Silver orders_clean (join, dedup)
 |   +-- gold_aggregation.py     # Silver -> Gold KPI/feature tables
 |
@@ -230,17 +233,25 @@ docker compose exec trino trino --execute \
 | `users` | Customers | `full_name`, `email`, `phone`, `city` |
 | `categories` | Product categories | `name`, `description` |
 | `products` | Products | FK `category_id`, `base_price`, `stock`, `is_active` |
-| `orders` | Orders - **the CDC subject** | FK `user_id`, `product_id`; `quantity`, `unit_price`, `total_amount`, `status` (`pending/confirmed/shipped/delivered/cancelled/returned`) |
+| `orders` | Orders | FK `user_id`, `product_id`; `quantity`, `unit_price`, `total_amount`, `status` (`pending/confirmed/shipped/delivered/cancelled/returned`) |
 
-Only `public.orders` is captured by Debezium (see `scripts/register_cdc.sh`);
-dims are snapshotted by Spark. Schema/seed: `sql/init_postgres.sql`.
+Debezium captures `orders`, `users`, `products`, and `categories` (see
+`scripts/register_cdc.sh`). Dimension events are appended to Bronze and applied
+incrementally to `dim_*_hist` by a checkpointed Spark micro-batch. PostgreSQL
+snapshots still maintain the separate Type 1 `dim_*_current` tables.
+Schema/seed: `sql/init_postgres.sql`.
+
+For an installation that already has snapshot-built `dim_*_hist`, inspect the
+pending CDC first with `dim_scd2.py --dry-run`. Starting CDC after the existing
+Bronze snapshot is an explicit one-time migration decision via
+`SCD2_ACCEPT_LEGACY_BASELINE=true`; the job never skips legacy events silently.
 
 ### Iceberg (catalog `iceberg`, Hive Metastore) - batch
 
 | Layer  | Tables                                                        |
 |--------|---------------------------------------------------------------|
-| Bronze | `bronze.orders_raw` (raw Parquet, MinIO `iceberg-datalake`)   |
-| Silver | `silver.orders_clean`, `silver.dim_products_current`, `silver.dim_*` |
+| Bronze | `bronze.orders_raw`, `bronze.{users,products,categories}_raw` |
+| Silver | `silver.orders_clean`, `silver.dim_*_current`, `silver.dim_*_hist` |
 | Gold   | `gold.city_revenue_hourly`, `gold.category_revenue_hourly`, `gold.product_features_daily` |
 
 ### Trino views (`iceberg.views`) - BI query layer

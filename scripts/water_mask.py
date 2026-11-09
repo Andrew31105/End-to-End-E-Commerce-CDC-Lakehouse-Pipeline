@@ -80,7 +80,9 @@ def get_current_snapshot_id(
 
 
 def read_new_spark(
-    spark: SparkSession, table_name: str = BRONZE_TABLE
+    spark: SparkSession,
+    table_name: str = BRONZE_TABLE,
+    pipeline_name: str = "silver",
 ) -> Tuple[DataFrame, Optional[str]]:
     """
     Incremental read Bronze (Iceberg table) theo snapshot id:
@@ -90,7 +92,7 @@ def read_new_spark(
     Không ghi watermark ở đây — caller phải ghi SAU KHI transform thành công,
     để nếu pipeline fail thì dữ liệu vẫn được xử lý lại ở lần chạy kế tiếp.
     """
-    last_snapshot = read_watermark(spark, "silver")
+    last_snapshot = read_watermark(spark, pipeline_name)
     current_snapshot = get_current_snapshot_id(spark, table_name)
 
     if current_snapshot is None:
