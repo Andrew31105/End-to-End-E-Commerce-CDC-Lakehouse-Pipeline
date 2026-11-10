@@ -1,2 +1,2 @@
-"""Reusable components for the snapshot-based SCD Type 2 Spark job."""
+"""Reusable components for the CDC-based SCD Type 2 Spark jobs."""
 
