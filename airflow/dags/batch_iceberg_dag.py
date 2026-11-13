@@ -4,7 +4,9 @@ from airflow import DAG
 from airflow.operators.bash import BashOperator
 
 EXEC = ('docker exec spark-master /opt/spark/bin/spark-submit '
-        '--conf spark.jars.ivy=/tmp/.ivy2 '
+        # Các task đầu DAG chạy song song. Mỗi task phải có Ivy cache riêng để
+        # tránh nhiều spark-submit cùng ghi một JAR tạm rồi làm hỏng cache.
+        '--conf spark.jars.ivy=/tmp/.ivy2-${AIRFLOW_CTX_TASK_ID} '
         '--packages "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,'
         'org.postgresql:postgresql:42.7.4" '
         '--master spark://spark-master:7077 /opt/spark/jobs/')

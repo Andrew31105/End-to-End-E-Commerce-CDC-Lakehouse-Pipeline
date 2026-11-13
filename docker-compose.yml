@@ -425,6 +425,8 @@ services:
       - ./airflow/dags:/opt/airflow/dags
       - ./spark_jobs:/opt/airflow/spark_jobs
       - ./scripts:/opt/airflow/scripts
+      # Webserver đọc đúng task log do LocalExecutor ghi ở scheduler.
+      - airflow_logs:/opt/airflow/logs
     command: webserver
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
@@ -448,6 +450,8 @@ services:
       - ./airflow/dags:/opt/airflow/dags
       - ./spark_jobs:/opt/airflow/spark_jobs
       - ./scripts:/opt/airflow/scripts
+      # Dùng chung với webserver để log hiển thị trực tiếp trên Airflow UI.
+      - airflow_logs:/opt/airflow/logs
       - /var/run/docker.sock:/var/run/docker.sock
     group_add:
       - "984"   # GID group 'docker' trên host -> airflow đọc được docker.sock
@@ -511,4 +515,5 @@ volumes:
   trino_data:
   airflow_pgdata:
   hive_pgdata:
+  airflow_logs:
 
