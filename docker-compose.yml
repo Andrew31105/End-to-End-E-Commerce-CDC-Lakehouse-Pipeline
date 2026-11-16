@@ -107,7 +107,7 @@ services:
   #  MinIO – Object Storage (S3-compatible) – Data Lake Bronze Zone
   # ============================================================
   minio:
-    image: minio/minio:RELEASE.2024-08-17T01-24-54Z
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     container_name: minio
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
@@ -127,7 +127,7 @@ services:
   #  MinIO Client – tự động tạo bucket khi khởi động
   # ============================================================
   minio-init:
-    image: minio/mc:latest
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     container_name: minio-init
     depends_on:
       minio:
@@ -454,7 +454,7 @@ services:
       - airflow_logs:/opt/airflow/logs
       - /var/run/docker.sock:/var/run/docker.sock
     group_add:
-      - "984"   # GID group 'docker' trên host -> airflow đọc được docker.sock
+      - "114"   # GID group 'docker' trên host -> airflow đọc được docker.sock
     command: scheduler
 
   # ============================================================
