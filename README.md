@@ -203,6 +203,8 @@ While running, Airflow `docker exec`s into `spark-master` to `spark-submit` and
 into `flink-jobmanager` to `flink run` (see `Dockerfile.airflow` - the image
 adds the docker CLI reading `/var/run/docker.sock`).
 
+![Successful Airflow Bronze to Silver to Gold batch pipeline](./jpg/batch-airflow.png)
+
 ### 5. Verify the data
 
 ```bash
@@ -215,6 +217,20 @@ docker compose exec clickhouse clickhouse-client \
 docker compose exec trino trino --execute \
   "SELECT * FROM iceberg.views.daily_revenue_summary ORDER BY report_date DESC LIMIT 5"
 ```
+
+Run the read-only quality checks against the real Iceberg SCD Type 2 tables:
+
+```bash
+docker exec spark-master /opt/spark/bin/spark-submit \
+  --master spark://spark-master:7077 \
+  /opt/spark/jobs/dim_scd2_quality.py
+```
+
+The checks enforce valid, non-overlapping history intervals, one current row
+per business key, open-ended current versions, unique source events and no
+duplicate consecutive states.
+
+![SCD Type 2 data quality checks passing on real Iceberg tables](<./jpg/Screenshot from 2026-11-16 21-08-42.png>)
 
 ## Cloud deployment - Microsoft Azure
 
