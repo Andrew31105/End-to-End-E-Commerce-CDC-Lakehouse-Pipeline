@@ -3,11 +3,25 @@
 A **Lakehouse + Feature Store** system that reads a single CDC source
 (PostgreSQL) to serve both **batch features** (Spark -> Iceberg -> Trino; for
 training and BI) and **realtime features** (Flink -> ClickHouse; online
-inference in <100 ms).
+inference in <100 ms). The complete Docker Compose stack can run locally or on
+a Microsoft Azure Linux VM; the delivery model below uses GitHub Actions for
+CI checks and controlled SSH deployment to Azure.
 
 ## Architecture
 
 ![Lakehouse Architecture](./jpg/lakehhouse2.jpg)
+
+**Cloud delivery path**
+
+```mermaid
+flowchart LR
+    DEV[Developer] -->|push / pull request| GH[GitHub]
+    GH --> CI[GitHub Actions CI]
+    CI -->|main branch only| CD[GitHub Actions CD]
+    CD -->|SSH| VM[Azure Linux VM]
+    VM --> DC[Docker Compose]
+    DC --> PIPELINE[CDC + Lakehouse + BI services]
+```
 
 
 **Data lifecycle**
@@ -201,6 +215,132 @@ docker compose exec clickhouse clickhouse-client \
 docker compose exec trino trino --execute \
   "SELECT * FROM iceberg.views.daily_revenue_summary ORDER BY report_date DESC LIMIT 5"
 ```
+
+## Cloud deployment - Microsoft Azure
+
+The stack has been deployed and validated on a single Azure VM. This is a
+portfolio/dev environment, not a highly available production topology.
+
+| Component | Azure setup |
+|-----------|-------------|
+| Compute | Azure Virtual Machine, Ubuntu 24.04 LTS |
+| Recommended size | 4 vCPU / 16 GB RAM for the full stack |
+| Runtime | Docker Engine + Docker Compose v2 |
+| Deployment | Git repository cloned to `~/apps/second_project` |
+| Persistence | Docker named volumes for PostgreSQL, MinIO, Hive Metastore, Airflow and BI metadata |
+| Access | SSH; service UIs are reached through SSH tunnels |
+
+### First deployment
+
+```bash
+git clone https://github.com/Andrew31105/End-to-End-E-Commerce-CDC-Lakehouse-Pipeline.git \
+  ~/apps/second_project
+cd ~/apps/second_project
+
+cp .env.example .env                 # replace every CHANGE_ME value
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+
+mkdir -p data/olist
+docker compose config --quiet
+docker compose up -d --build
+docker compose ps
+```
+
+`Dataset/`, `data/` and `.env` are intentionally not stored in Git. Transfer
+the Olist CSV files separately before running the historical backfill. Never
+commit the VM's `.env` file.
+
+Register CDC only after PostgreSQL, Kafka and Kafka Connect are healthy:
+
+```bash
+bash scripts/register_cdc.sh
+curl -s http://localhost:8083/connectors/ecommerce-pg-connector/status \
+  | python3 -m json.tool
+```
+
+### Secure access to service UIs
+
+Keep application ports private in the Azure Network Security Group and expose
+only SSH (`22`) where possible. Forward the required ports from the developer
+machine instead of publishing every UI to the Internet:
+
+```bash
+ssh \
+  -L 8085:localhost:8085 \
+  -L 8088:localhost:8088 \
+  -L 9001:localhost:9001 \
+  -L 8080:localhost:8080 \
+  azureuser@<AZURE_VM_PUBLIC_IP>
+```
+
+The Airflow, Superset, MinIO and Spark UIs are then available on the same
+`localhost` URLs listed in the Services section.
+
+### Updating an existing VM
+
+```bash
+cd ~/apps/second_project
+git pull --ff-only
+docker compose config --quiet
+docker compose up -d --build
+docker compose ps
+```
+
+Do not use `docker compose down -v` during deployment: `-v` removes persistent
+data volumes. Database schema migrations and one-off jobs should be run
+explicitly and independently of the application restart.
+
+## CI/CD - GitHub Actions
+
+The Azure VM deployment is currently reproducible with the commands above.
+GitHub Actions can automate the same delivery contract without placing
+application credentials in the repository.
+
+| Stage | Trigger | Required checks/actions |
+|-------|---------|-------------------------|
+| CI | Pull request and push | Validate Compose, compile Python, run unit tests and build changed images |
+| CD | Successful CI on `main` | SSH to the Azure VM, fast-forward pull, validate Compose, rebuild changed services and run health checks |
+| Post-deploy | After Compose starts | Check container health, Debezium connector state, Kafka CDC topics and Airflow DAG availability |
+
+Configure a protected GitHub Environment such as `azure-dev` and add these
+repository/environment secrets:
+
+| Secret | Purpose |
+|--------|---------|
+| `AZURE_VM_HOST` | VM public IP or DNS name |
+| `AZURE_VM_USER` | SSH user, for example `azureuser` |
+| `AZURE_VM_SSH_KEY` | Private deployment key dedicated to GitHub Actions |
+| `AZURE_VM_PORT` | SSH port (`22` unless changed) |
+| `AZURE_PROJECT_DIR` | Absolute project path on the VM |
+
+The VM keeps the runtime `.env`; CI/CD must not copy secrets from GitHub into
+the repository. A CD job should execute the following idempotent deployment
+sequence after CI succeeds:
+
+```bash
+cd "$AZURE_PROJECT_DIR"
+git pull --ff-only origin main
+docker compose config --quiet
+docker compose up -d --build
+docker compose ps
+```
+
+Recommended deployment controls:
+
+- allow CD only from the protected `main` branch;
+- require CI success and optional manual approval for `azure-dev`;
+- use a dedicated SSH deploy key with the minimum required permissions;
+- serialize deployments so two workflow runs cannot update the VM together;
+- retain the previous Git commit for rollback, but never roll back by deleting
+  Docker volumes;
+- fail the workflow when a required container is exited/unhealthy or the
+  Debezium connector task is not `RUNNING`.
+
+This section defines the CI/CD contract. Add
+`.github/workflows/ci-cd.yml` when enabling the automation; until that file and
+the required secrets exist, Azure updates remain manual.
 
 ## Services
 
