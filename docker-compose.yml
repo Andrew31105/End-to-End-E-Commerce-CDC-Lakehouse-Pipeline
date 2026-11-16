@@ -160,6 +160,9 @@ services:
     container_name: hive-metastore
     environment:
       METASTORE_DB_HOSTNAME: hive-metastore-db
+      HIVE_METASTORE_DB: ${HIVE_METASTORE_DB:-metastore}
+      HIVE_METASTORE_DB_USER: ${HIVE_METASTORE_DB_USER:-hive}
+      HIVE_METASTORE_DB_PASSWORD: ${HIVE_METASTORE_DB_PASSWORD:-hive123}
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
     entrypoint: >

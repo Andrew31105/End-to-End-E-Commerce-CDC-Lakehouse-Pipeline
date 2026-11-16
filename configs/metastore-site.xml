@@ -12,15 +12,15 @@
   </property>
   <property>
     <name>javax.jdo.option.ConnectionURL</name>
-    <value>jdbc:postgresql://hive-metastore-db:5432/metastore</value>
+    <value>jdbc:postgresql://${env.METASTORE_DB_HOSTNAME}:5432/${env.HIVE_METASTORE_DB}</value>
   </property>
   <property>
     <name>javax.jdo.option.ConnectionUserName</name>
-    <value>hive</value>
+    <value>${env.HIVE_METASTORE_DB_USER}</value>
   </property>
   <property>
     <name>javax.jdo.option.ConnectionPassword</name>
-    <value>hive123</value>
+    <value>${env.HIVE_METASTORE_DB_PASSWORD}</value>
   </property>
 
   <!-- Metastore Thrift service -->
