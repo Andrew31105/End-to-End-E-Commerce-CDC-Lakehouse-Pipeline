@@ -23,6 +23,8 @@ def spark() -> SparkSession:
     # Match production's UTC Spark session so boundary values (especially the
     # SCD2 9999-12-31 sentinel) are deterministic on every developer machine.
     os.environ["TZ"] = "UTC"
+    # Avoid hostname/network-interface discovery differences across CI runners.
+    os.environ.setdefault("SPARK_LOCAL_IP", "127.0.0.1")
     time.tzset()
     session = (
         SparkSession.builder.master("local[2]")

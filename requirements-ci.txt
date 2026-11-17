@@ -1,0 +1,7 @@
+# Host dependencies are installed as part of CI so invalid or conflicting
+# production pins fail before deployment.
+-r requirements.txt
+
+# Unit-test runtime. Keep PySpark aligned with Dockerfile.spark.
+pytest==9.0.3
+pyspark==3.5.9
