@@ -10,15 +10,14 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   validate-and-test:
     name: Validate and test
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    concurrency:
+      group: ci-${{ github.ref }}
+      cancel-in-progress: true
     env:
       TZ: UTC
       PYSPARK_PYTHON: python
@@ -69,3 +68,165 @@ jobs:
 
       - name: Run SCD2 unit tests
         run: python -m pytest -q tests/unit
+
+  deploy-azure:
+    name: Deploy to Azure VM
+    needs: validate-and-test
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: azure-dev
+    concurrency:
+      group: deploy-azure-dev
+      cancel-in-progress: false
+    env:
+      DEPLOY_HOST: ${{ secrets.AZURE_VM_HOST }}
+      DEPLOY_USER: ${{ secrets.AZURE_VM_USER }}
+      DEPLOY_KEY: ${{ secrets.AZURE_VM_SSH_KEY }}
+      DEPLOY_KNOWN_HOSTS: ${{ secrets.AZURE_VM_KNOWN_HOSTS }}
+      DEPLOY_PORT: ${{ vars.AZURE_VM_PORT }}
+      DEPLOY_PROJECT_DIR: ${{ vars.AZURE_PROJECT_DIR }}
+
+    steps:
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          : "${DEPLOY_HOST:?Missing AZURE_VM_HOST environment secret}"
+          : "${DEPLOY_USER:?Missing AZURE_VM_USER environment secret}"
+          : "${DEPLOY_KEY:?Missing AZURE_VM_SSH_KEY environment secret}"
+          : "${DEPLOY_KNOWN_HOSTS:?Missing AZURE_VM_KNOWN_HOSTS environment secret}"
+          : "${DEPLOY_PROJECT_DIR:?Missing AZURE_PROJECT_DIR environment variable}"
+          DEPLOY_PORT="${DEPLOY_PORT:-22}"
+
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${DEPLOY_KEY}" > ~/.ssh/azure_deploy_key
+          chmod 600 ~/.ssh/azure_deploy_key
+          printf '%s\n' "${DEPLOY_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+          {
+            echo "Host azure-deploy"
+            echo "  HostName ${DEPLOY_HOST}"
+            echo "  User ${DEPLOY_USER}"
+            echo "  Port ${DEPLOY_PORT}"
+            echo "  IdentityFile ~/.ssh/azure_deploy_key"
+            echo "  IdentitiesOnly yes"
+            echo "  BatchMode yes"
+            echo "  StrictHostKeyChecking yes"
+            echo "  ConnectTimeout 15"
+            echo "  ServerAliveInterval 30"
+            echo "  ServerAliveCountMax 3"
+          } > ~/.ssh/config
+          chmod 600 ~/.ssh/config
+
+      - name: Verify SSH connectivity
+        run: ssh azure-deploy 'echo "SSH connection established"'
+
+      - name: Deploy tested commit
+        shell: bash
+        run: |
+          ssh azure-deploy bash -s -- "${GITHUB_SHA}" "${DEPLOY_PROJECT_DIR}" <<'REMOTE_SCRIPT'
+          set -Eeuo pipefail
+
+          deploy_sha="$1"
+          project_dir="$2"
+          cd "${project_dir}"
+
+          if [ ! -f .env ]; then
+            echo "ERROR: ${project_dir}/.env is missing"
+            exit 1
+          fi
+          if [ "$(git branch --show-current)" != "main" ]; then
+            echo "ERROR: Azure checkout must be on branch main"
+            exit 1
+          fi
+          if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+            echo "ERROR: Azure checkout has tracked local changes; refusing to overwrite them"
+            git status --short
+            exit 1
+          fi
+
+          git fetch --prune origin main
+          origin_sha="$(git rev-parse origin/main)"
+          if [ "${origin_sha}" != "${deploy_sha}" ]; then
+            echo "ERROR: origin/main=${origin_sha}, tested commit=${deploy_sha}"
+            echo "A newer commit exists; let its own workflow deploy it"
+            exit 1
+          fi
+          git merge --ff-only "${deploy_sha}"
+
+          docker compose config --quiet
+          docker compose up -d --build --remove-orphans
+
+          required_services=(
+            zookeeper kafka postgres connect minio
+            hive-metastore-db hive-metastore
+            spark-master spark-worker trino clickhouse
+            flink-jobmanager flink-taskmanager
+            airflow-postgres airflow-webserver airflow-scheduler
+            superset
+          )
+
+          for attempt in $(seq 1 30); do
+            all_ready=true
+            for service in "${required_services[@]}"; do
+              container_id="$(docker compose ps -q "${service}")"
+              if [ -z "${container_id}" ]; then
+                echo "Waiting: ${service} has no container"
+                all_ready=false
+                continue
+              fi
+
+              state="$(docker inspect --format '{{.State.Status}}' "${container_id}")"
+              health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${container_id}")"
+              if [ "${state}" != "running" ]; then
+                echo "Waiting: ${service} state=${state}"
+                all_ready=false
+              elif [ "${health}" != "none" ] && [ "${health}" != "healthy" ]; then
+                echo "Waiting: ${service} health=${health}"
+                all_ready=false
+              fi
+            done
+
+            if [ "${all_ready}" = true ]; then
+              break
+            fi
+            if [ "${attempt}" -eq 30 ]; then
+              echo "ERROR: services did not become ready within five minutes"
+              docker compose ps -a
+              exit 1
+            fi
+            sleep 10
+          done
+
+          connector_status="$(curl -fsS http://localhost:8083/connectors/ecommerce-pg-connector/status)"
+          CONNECTOR_STATUS="${connector_status}" python3 - <<'PY'
+          import json
+          import os
+
+          status = json.loads(os.environ["CONNECTOR_STATUS"])
+          connector_state = status.get("connector", {}).get("state")
+          task_states = [task.get("state") for task in status.get("tasks", [])]
+          if connector_state != "RUNNING" or not task_states or any(
+              state != "RUNNING" for state in task_states
+          ):
+              raise SystemExit(
+                  f"Debezium is not ready: connector={connector_state}, tasks={task_states}"
+              )
+          print(f"Debezium ready: connector={connector_state}, tasks={task_states}")
+          PY
+
+          airflow_dags="$(docker exec airflow-scheduler airflow dags list)"
+          if ! grep -q 'batch_iceberg_pipeline' <<< "${airflow_dags}"; then
+            echo "ERROR: batch_iceberg_pipeline is not available in Airflow"
+            printf '%s\n' "${airflow_dags}"
+            exit 1
+          fi
+
+          deployed_sha="$(git rev-parse HEAD)"
+          echo "Deployment successful: ${deployed_sha}"
+          docker compose ps
+          REMOTE_SCRIPT

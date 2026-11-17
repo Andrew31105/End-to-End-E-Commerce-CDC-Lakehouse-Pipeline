@@ -310,15 +310,17 @@ explicitly and independently of the application restart.
 
 ## CI/CD - GitHub Actions
 
-The Azure VM deployment is currently reproducible with the commands above.
-GitHub Actions can automate the same delivery contract without placing
-application credentials in the repository.
+[![CI/CD](https://github.com/Andrew31105/End-to-End-E-Commerce-CDC-Lakehouse-Pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/Andrew31105/End-to-End-E-Commerce-CDC-Lakehouse-Pipeline/actions/workflows/ci.yml)
+
+The workflow in `.github/workflows/ci.yml` validates every pull request and
+push. A successful `main` build deploys the exact tested commit to the Azure VM
+through the protected `azure-dev` environment.
 
 | Stage | Trigger | Required checks/actions |
 |-------|---------|-------------------------|
-| CI | Pull request and push | Validate Compose, compile Python, run unit tests and build changed images |
+| CI | Pull request and push | Validate Compose/shell/Python, resolve dependencies and run PySpark SCD2 unit tests |
 | CD | Successful CI on `main` | SSH to the Azure VM, fast-forward pull, validate Compose, rebuild changed services and run health checks |
-| Post-deploy | After Compose starts | Check container health, Debezium connector state, Kafka CDC topics and Airflow DAG availability |
+| Post-deploy | After Compose starts | Check required containers, Debezium connector/tasks and Airflow DAG availability |
 
 Configure a protected GitHub Environment such as `azure-dev` and add these
 repository/environment secrets:
@@ -328,12 +330,18 @@ repository/environment secrets:
 | `AZURE_VM_HOST` | VM public IP or DNS name |
 | `AZURE_VM_USER` | SSH user, for example `azureuser` |
 | `AZURE_VM_SSH_KEY` | Private deployment key dedicated to GitHub Actions |
+| `AZURE_VM_KNOWN_HOSTS` | Verified SSH host key produced by `ssh-keyscan` |
+
+Environment variables:
+
+| Variable | Purpose |
+|----------|---------|
 | `AZURE_VM_PORT` | SSH port (`22` unless changed) |
 | `AZURE_PROJECT_DIR` | Absolute project path on the VM |
 
-The VM keeps the runtime `.env`; CI/CD must not copy secrets from GitHub into
-the repository. A CD job should execute the following idempotent deployment
-sequence after CI succeeds:
+The VM keeps the runtime `.env`; CI/CD never copies application credentials
+into the repository. The deployment refuses to overwrite tracked VM changes,
+fast-forwards only to the tested commit, and then executes:
 
 ```bash
 cd "$AZURE_PROJECT_DIR"
@@ -353,10 +361,6 @@ Recommended deployment controls:
   Docker volumes;
 - fail the workflow when a required container is exited/unhealthy or the
   Debezium connector task is not `RUNNING`.
-
-This section defines the CI/CD contract. Add
-`.github/workflows/ci-cd.yml` when enabling the automation; until that file and
-the required secrets exist, Azure updates remain manual.
 
 ## Services
 
